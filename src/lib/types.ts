@@ -49,10 +49,16 @@ export interface Blueprint {
   segments: SegmentPlan[];
 }
 
-/** One finished segment of narration prose from Stage 3. */
+/**
+ * One finished segment of narration prose from Stage 3. For now a segment maps
+ * 1:1 to a scene, so it carries its own image-generation prompt (later this may
+ * split into multiple scenes per segment via the scene-splitter pass).
+ */
 export interface StorySegment {
   index: number;
   text: string;
+  /** Per-scene prompt for the image-generation pass. */
+  imagePrompt: string;
 }
 
 /** Stage 5 deliverable. `scenes`/`description`/`tags` are reserved for later passes. */
