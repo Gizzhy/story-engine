@@ -1,9 +1,8 @@
-import type { Dispatch, SetStateAction } from "react";
 import type { GenerationInput, PremiseDistance } from "@/lib/types";
 
 interface PremiseDistanceDialProps {
   value: PremiseDistance;
-  onInputChange: Dispatch<SetStateAction<GenerationInput>>;
+  updateInput: (patch: Partial<GenerationInput>) => void;
 }
 
 /** Levels + descriptions per docs/engine-spec.md → "Premise-distance dial (1–5)". */
@@ -42,7 +41,7 @@ const LEVELS: { value: PremiseDistance; name: string; blurb: string }[] = [
  */
 export default function PremiseDistanceDial({
   value,
-  onInputChange,
+  updateInput,
 }: PremiseDistanceDialProps) {
   const active = LEVELS[value - 1];
 
@@ -75,10 +74,7 @@ export default function PremiseDistanceDial({
                   aria-pressed={selected}
                   aria-label={`Premise distance: ${level.name}`}
                   onClick={() =>
-                    onInputChange((prev) => ({
-                      ...prev,
-                      premiseDistance: level.value,
-                    }))
+                    updateInput({ premiseDistance: level.value })
                   }
                   className={`h-3.5 w-3.5 rounded-full border transition-colors ${
                     selected

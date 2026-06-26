@@ -120,6 +120,44 @@ export const mockGeneration: Generation = {
     'ghost story',
     'mystery narration',
   ],
+  hashtags: [
+    '#scarystories',
+    '#creepypasta',
+    '#narratedstory',
+    '#hotelmystery',
+    '#horrorstory',
+    '#nightshift',
+  ],
+  hooks: [
+    "The hotel gave me exactly one rule on my first night: Room 9 is occupied, it is paid, and you never, ever knock.",
+    "For thirty years the same guest has slept in Room 9 of the Glasswater Hotel — and last night I finally found out who he is.",
+    "Every old hotel has a room nobody talks about. At the Glasswater it's Room 9, and I was hired to keep it that way.",
+    "The night auditor before me asked one question too many. Then he checked into Room 9, and he never checked out.",
+    "I took the quietest job in the mountains. Three weeks in, I found my own handwriting signing a guest out at 3:14 a.m.",
+  ],
+  suggestedHookCount: 4,
+  thumbnailPrompt:
+    "Bold high-contrast YouTube thumbnail, 16:9: a dim hotel corridor at night with a single heavy door marked with a brass '9' glowing from an eerie golden light spilling beneath it, low fog seeping across patterned carpet, a lone silhouetted man frozen mid-step before the door. Dramatic cinematic lighting, deep teal shadows against warm amber glow, high saturation, sharp focus, ominous and mysterious, generous negative space on the left for large bold title text.",
+  characters: [
+    {
+      name: 'Daniel August Reese',
+      role: 'Narrator · night auditor',
+      imagePrompt:
+        "Character reference, photorealistic cinematic portrait: a lean man in his late thirties with tired, watchful insomniac eyes, short dark hair going grey at the temples, three-day stubble, a plain charcoal overcoat over a rumpled button-down, the worn look of someone who lives at night. Calm but haunted expression, soft moody key light against a neutral dark background, muted teal-and-amber palette, consistent lighting for reuse across scenes, 35mm film grain.",
+    },
+    {
+      name: 'Marguerite Vell',
+      role: 'Day manager',
+      imagePrompt:
+        "Character reference, photorealistic cinematic portrait: a composed woman in her early sixties, silver hair in a low neat twist, sharp attentive eyes, a tailored wool cardigan over a high-collared blouse, a small brass key pinned at her lapel. Guarded, dignified, quietly protective expression, warm soft lobby lighting against a neutral dark background, muted palette, consistent lighting for reuse, fine detail.",
+    },
+    {
+      name: 'The Guest in Room 9',
+      role: 'The standing occupancy',
+      imagePrompt:
+        "Character reference, photorealistic cinematic portrait: a man who uncannily resembles Daniel — the same jaw, the same insomniac eyes — but older and utterly settled, in a soft worn cardigan, seated by a warm reading lamp with a book. Patient, kind, unsettlingly serene expression, warm amber lamplight against deep shadow, intimate uncanny mood, consistent lighting for reuse as a doppelganger reference, subtle film grain.",
+    },
+  ],
   scenes: [],
   segments: [
     {

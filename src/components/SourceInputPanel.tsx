@@ -1,13 +1,12 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import type { GenerationInput } from "@/lib/types";
 import { MIN_TRANSCRIPT_WORDS, countWords } from "@/lib/text";
 
 interface SourceInputPanelProps {
   input: GenerationInput;
-  onInputChange: Dispatch<SetStateAction<GenerationInput>>;
+  updateInput: (patch: Partial<GenerationInput>) => void;
 }
 
 /**
@@ -18,7 +17,7 @@ interface SourceInputPanelProps {
  */
 export default function SourceInputPanel({
   input,
-  onInputChange,
+  updateInput,
 }: SourceInputPanelProps) {
   const transcriptRef = useRef<HTMLTextAreaElement>(null);
   const words = countWords(input.sourceTranscript);
@@ -33,11 +32,11 @@ export default function SourceInputPanel({
   }, [input.sourceTranscript]);
 
   function setTitle(value: string) {
-    onInputChange((prev) => ({ ...prev, sourceTitle: value }));
+    updateInput({ sourceTitle: value });
   }
 
   function setTranscript(value: string) {
-    onInputChange((prev) => ({ ...prev, sourceTranscript: value }));
+    updateInput({ sourceTranscript: value });
   }
 
   function clearTranscript() {

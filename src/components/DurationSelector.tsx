@@ -1,9 +1,8 @@
-import type { Dispatch, SetStateAction } from "react";
 import type { Duration, GenerationInput } from "@/lib/types";
 
 interface DurationSelectorProps {
   value: Duration;
-  onInputChange: Dispatch<SetStateAction<GenerationInput>>;
+  updateInput: (patch: Partial<GenerationInput>) => void;
 }
 
 const DURATIONS: Duration[] = [30, 45, 60, 75, 90];
@@ -17,7 +16,7 @@ const WPM = 140;
  */
 export default function DurationSelector({
   value,
-  onInputChange,
+  updateInput,
 }: DurationSelectorProps) {
   const wordTarget = value * WPM;
 
@@ -35,9 +34,7 @@ export default function DurationSelector({
               key={minutes}
               type="button"
               aria-pressed={selected}
-              onClick={() =>
-                onInputChange((prev) => ({ ...prev, durationMinutes: minutes }))
-              }
+              onClick={() => updateInput({ durationMinutes: minutes })}
               className={`flex-1 rounded py-2 text-sm tabular-nums transition-colors ${
                 selected
                   ? "bg-petrol text-canvas"

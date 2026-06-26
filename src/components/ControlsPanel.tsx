@@ -1,4 +1,3 @@
-import type { Dispatch, SetStateAction } from "react";
 import type { GenerationInput, JobStatus } from "@/lib/types";
 import SourceInputPanel from "@/components/SourceInputPanel";
 import DurationSelector from "@/components/DurationSelector";
@@ -8,7 +7,7 @@ import GenerateButton from "@/components/GenerateButton";
 
 interface ControlsPanelProps {
   input: GenerationInput;
-  onInputChange: Dispatch<SetStateAction<GenerationInput>>;
+  updateInput: (patch: Partial<GenerationInput>) => void;
   status: JobStatus;
   onGenerate: () => void;
   isValid: boolean;
@@ -20,7 +19,7 @@ interface ControlsPanelProps {
  */
 export default function ControlsPanel({
   input,
-  onInputChange,
+  updateInput,
   status,
   onGenerate,
   isValid,
@@ -40,16 +39,16 @@ export default function ControlsPanel({
         </p>
       </header>
 
-      <SourceInputPanel input={input} onInputChange={onInputChange} />
+      <SourceInputPanel input={input} updateInput={updateInput} />
       <DurationSelector
         value={input.durationMinutes}
-        onInputChange={onInputChange}
+        updateInput={updateInput}
       />
       <PremiseDistanceDial
         value={input.premiseDistance}
-        onInputChange={onInputChange}
+        updateInput={updateInput}
       />
-      <AdvancedSection input={input} onInputChange={onInputChange} />
+      <AdvancedSection input={input} updateInput={updateInput} />
       <GenerateButton
         isValid={isValid}
         status={status}

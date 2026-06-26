@@ -61,17 +61,43 @@ export interface StorySegment {
   imagePrompt: string;
 }
 
-/** Stage 5 deliverable. `scenes`/`description`/`tags` are reserved for later passes. */
+/** A recurring cast member, with a reusable character-reference image prompt. */
+export interface Character {
+  name: string;
+  role: string;
+  /** Prompt for a consistent, reusable character reference image. */
+  imagePrompt: string;
+}
+
+/** An opening "hook" rendered as an attention-grabbing intro motion scene. */
+export interface HookScene {
+  index: number;
+  /** Motion/image-generation prompt for the opening shot. */
+  imagePrompt: string;
+}
+
+/** Stage 5 deliverable. `scenes` is reserved for the future scene-splitter pass. */
 export interface Generation {
   title: string;
   titleOptions: string[];
   durationMinutes: Duration;
   wordCount: number;
   segments: StorySegment[];
+  /** Reusable character references for the image pipeline. */
+  characters: Character[];
+  /** Opening-line variations the user can choose from. */
+  hooks: string[];
+  /** The AI's recommendation for how many of `hooks` suit this story. */
+  suggestedHookCount: number;
+  /** Click-optimised prompt for the video thumbnail image. */
+  thumbnailPrompt: string;
   /** LATER: a scene-splitter pass populates these with imagePrompts. */
   scenes: unknown[];
   description?: string;
+  /** SEO keyword tags. */
   tags?: string[];
+  /** Social #hashtags (kept separate from `tags`). */
+  hashtags: string[];
 }
 
 /** Lifecycle of a generation job; the right canvas is a state machine over this. */

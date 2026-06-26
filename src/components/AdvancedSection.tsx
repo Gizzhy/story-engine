@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import type { GenerationInput } from "@/lib/types";
 
 interface AdvancedSectionProps {
   input: GenerationInput;
-  onInputChange: Dispatch<SetStateAction<GenerationInput>>;
+  updateInput: (patch: Partial<GenerationInput>) => void;
 }
 
 /**
@@ -15,7 +14,7 @@ interface AdvancedSectionProps {
  */
 export default function AdvancedSection({
   input,
-  onInputChange,
+  updateInput,
 }: AdvancedSectionProps) {
   const [open, setOpen] = useState(false);
 
@@ -55,12 +54,7 @@ export default function AdvancedSection({
             </span>
             <textarea
               value={input.premiseSeed ?? ""}
-              onChange={(e) =>
-                onInputChange((prev) => ({
-                  ...prev,
-                  premiseSeed: e.target.value,
-                }))
-              }
+              onChange={(e) => updateInput({ premiseSeed: e.target.value })}
               placeholder="Have your own idea? Sketch the story you want and the engine builds from it."
               rows={3}
               className="w-full resize-none rounded-md border border-line-ink bg-ink-soft px-3.5 py-2.5 text-sm leading-relaxed text-canvas placeholder:text-canvas/30 outline-none transition-colors focus:border-petrol-bright"
@@ -74,12 +68,7 @@ export default function AdvancedSection({
             </span>
             <textarea
               value={input.styleSample ?? ""}
-              onChange={(e) =>
-                onInputChange((prev) => ({
-                  ...prev,
-                  styleSample: e.target.value,
-                }))
-              }
+              onChange={(e) => updateInput({ styleSample: e.target.value })}
               placeholder="Paste a sample of your narration and the engine matches its voice."
               rows={3}
               className="w-full resize-none rounded-md border border-line-ink bg-ink-soft px-3.5 py-2.5 text-sm leading-relaxed text-canvas placeholder:text-canvas/30 outline-none transition-colors focus:border-petrol-bright"

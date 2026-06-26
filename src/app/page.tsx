@@ -17,6 +17,11 @@ const DEFAULT_INPUT: GenerationInput = {
 export default function StudioPage() {
   const [input, setInput] = useState<GenerationInput>(DEFAULT_INPUT);
 
+  // The single, consistent path for every left-column control to report a
+  // change: a partial patch merged into the page-level `input` state.
+  const updateInput = (patch: Partial<GenerationInput>) =>
+    setInput((prev) => ({ ...prev, ...patch }));
+
   // The simulated pipeline owns `status` and the streamed segments. Swap the
   // hook's internals for real API calls later — this wiring won't change.
   const { status, completedSegments, totalSegments, start, approve, reset } =
@@ -29,7 +34,7 @@ export default function StudioPage() {
     <div className="flex min-h-screen flex-1 flex-col md:h-screen md:flex-row md:overflow-hidden">
       <ControlsPanel
         input={input}
-        onInputChange={setInput}
+        updateInput={updateInput}
         status={status}
         onGenerate={start}
         isValid={isValid}
