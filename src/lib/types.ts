@@ -85,9 +85,9 @@ export interface Generation {
   segments: StorySegment[];
   /** Reusable character references for the image pipeline. */
   characters: Character[];
-  /** Opening-line variations the user can choose from. */
-  hooks: string[];
-  /** The AI's recommendation for how many of `hooks` suit this story. */
+  /** Intro motion scenes — attention-grabbing opening shots. */
+  hooks: HookScene[];
+  /** The AI's recommendation for how many intro motion scenes suit this story. */
   suggestedHookCount: number;
   /** Click-optimised prompt for the video thumbnail image. */
   thumbnailPrompt: string;

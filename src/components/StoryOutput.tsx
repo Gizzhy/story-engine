@@ -31,11 +31,10 @@ export default function StoryOutput({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showPrompts, setShowPrompts] = useState(true);
   const [showAllHooks, setShowAllHooks] = useState(false);
-  const [selectedHook, setSelectedHook] = useState(0);
 
   const { segments, characters, description, hooks } = generation;
   const tags = generation.tags ?? [];
-  // Default to the AI's suggested count; "Show all" reveals the rest.
+  // Default to the AI's suggested count of intro motion scenes.
   const suggestedHookCount = Math.min(
     generation.suggestedHookCount,
     hooks.length,
@@ -54,6 +53,9 @@ export default function StoryOutput({
     .join("\n\n");
   const allCharacterPrompts = characters
     .map((c) => `${c.name}: ${c.imagePrompt}`)
+    .join("\n\n");
+  const allHookPrompts = hooks
+    .map((h, i) => `Hook ${i + 1}: ${h.imagePrompt}`)
     .join("\n\n");
 
   async function copy(key: string, text: string) {
@@ -114,66 +116,6 @@ export default function StoryOutput({
             {generation.title}
           </h1>
 
-          {/* Hooks */}
-          <div className="mt-9">
-            <SubHead
-              title="Hooks"
-              action={
-                <div className="flex items-center gap-2.5">
-                  <span className="font-mono text-[0.6rem] uppercase tracking-[0.15em] text-faint">
-                    AI-suggested: {suggestedHookCount}
-                  </span>
-                  {hooks.length > suggestedHookCount && (
-                    <GhostButton onClick={() => setShowAllHooks((v) => !v)}>
-                      {showAllHooks ? "Show fewer" : `Show all ${hooks.length}`}
-                    </GhostButton>
-                  )}
-                </div>
-              }
-            />
-            <div className="mt-3 flex flex-col gap-2">
-              {visibleHooks.map((hook, i) => {
-                const selected = i === selectedHook;
-                return (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2 rounded-md border px-3 py-2.5 transition-colors ${
-                      selected
-                        ? "border-petrol bg-petrol/10"
-                        : "border-line bg-surface"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => setSelectedHook(i)}
-                      className="flex flex-1 items-start gap-2 text-left"
-                    >
-                      <span
-                        className={`mt-0.5 font-mono text-xs ${
-                          selected ? "text-petrol" : "text-faint"
-                        }`}
-                        aria-hidden
-                      >
-                        {selected ? "●" : "○"}
-                      </span>
-                      <span
-                        className={`text-sm leading-snug ${
-                          selected ? "text-ink" : "text-muted"
-                        }`}
-                      >
-                        {hook}
-                      </span>
-                    </button>
-                    <GhostButton onClick={() => copy(`hook-${i}`, hook)}>
-                      {label(`hook-${i}`, "Copy")}
-                    </GhostButton>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Body controls */}
           <div className="mt-9 flex items-center justify-between border-t border-line pt-4">
             <SubHead title="Story" />
@@ -222,17 +164,61 @@ export default function StoryOutput({
 
         {/* ── VISUALS ────────────────────────────────────────────── */}
         <Cluster label="Visuals">
-          {/* Characters */}
-          <SubHead
-            title="Characters"
-            action={
-              <GhostButton
-                onClick={() => copy("chars", allCharacterPrompts)}
-              >
-                {label("chars", "Copy all character prompts")}
+          {/* Intro / Hook scenes */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-baseline gap-2.5">
+              <h3 className="text-sm font-medium text-ink">
+                Intro / Hook scenes
+              </h3>
+              <span className="font-mono text-[0.6rem] uppercase tracking-[0.15em] text-faint">
+                AI-suggested: {suggestedHookCount}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {hooks.length > suggestedHookCount && (
+                <GhostButton onClick={() => setShowAllHooks((v) => !v)}>
+                  {showAllHooks ? "Show fewer" : `Show all ${hooks.length}`}
+                </GhostButton>
+              )}
+              <GhostButton onClick={() => copy("hooks", allHookPrompts)}>
+                {label("hooks", "Copy all hook prompts")}
               </GhostButton>
-            }
-          />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-col gap-3">
+            {visibleHooks.map((hook, i) => (
+              <div
+                key={hook.index}
+                className="rounded-md border border-line bg-surface/60 px-4 py-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[0.6rem] uppercase tracking-[0.18em] text-petrol">
+                    Hook {i + 1}
+                  </span>
+                  <GhostButton
+                    onClick={() => copy(`hook-${i}`, hook.imagePrompt)}
+                  >
+                    {label(`hook-${i}`, "Copy")}
+                  </GhostButton>
+                </div>
+                <p className="mt-1.5 font-mono text-xs leading-relaxed text-muted">
+                  {hook.imagePrompt}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Characters */}
+          <div className="mt-9 border-t border-line pt-7">
+            <SubHead
+              title="Characters"
+              action={
+                <GhostButton onClick={() => copy("chars", allCharacterPrompts)}>
+                  {label("chars", "Copy all character prompts")}
+                </GhostButton>
+              }
+            />
+          </div>
           <div className="mt-3 flex flex-col gap-3">
             {characters.map((character, i) => (
               <div

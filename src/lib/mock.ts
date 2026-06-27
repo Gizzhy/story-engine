@@ -129,11 +129,31 @@ export const mockGeneration: Generation = {
     '#nightshift',
   ],
   hooks: [
-    "The hotel gave me exactly one rule on my first night: Room 9 is occupied, it is paid, and you never, ever knock.",
-    "For thirty years the same guest has slept in Room 9 of the Glasswater Hotel — and last night I finally found out who he is.",
-    "Every old hotel has a room nobody talks about. At the Glasswater it's Room 9, and I was hired to keep it that way.",
-    "The night auditor before me asked one question too many. Then he checked into Room 9, and he never checked out.",
-    "I took the quietest job in the mountains. Three weeks in, I found my own handwriting signing a guest out at 3:14 a.m.",
+    {
+      index: 1,
+      imagePrompt:
+        "Slow push-in down a long, dim ninth-floor hotel corridor toward a single closed door with a brass '9', a thin blade of warm golden light leaking from beneath it and pulsing almost imperceptibly; low fog drifts across patterned carpet. Handheld micro-shake, deep teal shadows against amber glow, volumetric light, ominous hush, photoreal cinematic, shallow depth of field, 35mm grain.",
+    },
+    {
+      index: 2,
+      imagePrompt:
+        "Slow overhead crane descent onto an open leather occupancy ledger under a desk lamp, the camera settling as a single line of handwriting finishes itself with no hand present, ink glistening wet; a clock in soft focus ticks toward 3:14. Subtle dolly, warm lamplight pooled in cold blue dark, eerie stillness broken by motion, photoreal, shallow focus, film grain.",
+    },
+    {
+      index: 3,
+      imagePrompt:
+        "A lone bus carves up a fog-swallowed mountain road at dusk toward a vast faded alpine hotel, the camera tracking alongside then craning up to the hotel's many dark windows — all black except one, where a warm light clicks on. Sweeping aerial-to-tracking move, muted teal-and-amber palette, melancholy grandeur, cinematic wide, atmospheric haze, photoreal.",
+    },
+    {
+      index: 4,
+      imagePrompt:
+        "Push past a weary night auditor at a brass front desk as he looks up, the camera drifting toward the elevator's brass arrow climbing on its own to the 9th floor while no one waits; lobby chandeliers flicker half-lit. Smooth gliding dolly, warm desk light against deep shadow, creeping dread, photoreal cinematic, shallow depth of field, subtle grain.",
+    },
+    {
+      index: 5,
+      imagePrompt:
+        "Slow rack-focus across a basement wall of yellowed registration cards as the camera glides past decades of signatures, pulling focus to a repeated underlined initial 'A', dust motes swirling in a single hanging bulb's light. Lateral tracking move, cold damp blue-grey tones cut by one warm bulb, unsettling reveal, film-noir mood, photoreal, fine grain.",
+    },
   ],
   suggestedHookCount: 4,
   thumbnailPrompt:
