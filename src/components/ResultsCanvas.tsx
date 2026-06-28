@@ -1,5 +1,10 @@
-import type { JobStatus, StorySegment } from "@/lib/types";
-import { mockBlueprint, mockGeneration } from "@/lib/mock";
+import type {
+  Blueprint,
+  Generation,
+  JobSegment,
+  JobStatus,
+} from "@/lib/types";
+import type { WriteProgress } from "@/lib/useGeneration";
 import StoryOutput from "@/components/StoryOutput";
 import BlueprintReview from "@/components/BlueprintReview";
 import GenerationProgress from "@/components/GenerationProgress";
@@ -8,20 +13,27 @@ const GENERATING_STATES: JobStatus[] = ["analyzing", "planning", "writing"];
 
 interface ResultsCanvasProps {
   status: JobStatus;
-  completedSegments: StorySegment[];
-  totalSegments: number;
-  onApprove: () => void;
+  blueprint: Blueprint | null;
+  errorMessage: string | null;
+  segments: JobSegment[];
+  writeProgress: WriteProgress | null;
+  generation: Generation | null;
+  onApprove: (chosenTitle: string) => void;
   onReset: () => void;
 }
 
 /**
  * The right-hand "page" — a state machine over JobStatus: the idle empty state,
- * the blueprint review, the live generation progress, and the finished story.
+ * live generation progress, the blueprint review, the finished story, and an
+ * error state.
  */
 export default function ResultsCanvas({
   status,
-  completedSegments,
-  totalSegments,
+  blueprint,
+  errorMessage,
+  segments,
+  writeProgress,
+  generation,
   onApprove,
   onReset,
 }: ResultsCanvasProps) {
@@ -32,25 +44,63 @@ export default function ResultsCanvas({
           <EmptyState />
         </div>
       )}
-      {status === "blueprint_ready" && (
+      {GENERATING_STATES.includes(status) && (
+        <GenerationProgress
+          status={status}
+          segments={segments}
+          writeProgress={writeProgress}
+          onCancel={onReset}
+        />
+      )}
+      {status === "blueprint_ready" && blueprint && (
         <BlueprintReview
-          blueprint={mockBlueprint}
+          blueprint={blueprint}
           onApprove={onApprove}
           onRegenerate={onReset}
         />
       )}
-      {GENERATING_STATES.includes(status) && (
-        <GenerationProgress
-          status={status}
-          totalSegments={totalSegments}
-          completed={completedSegments}
-          onCancel={onReset}
-        />
+      {status === "done" && generation && (
+        <StoryOutput generation={generation} onRegenerate={onReset} />
       )}
-      {status === "done" && (
-        <StoryOutput generation={mockGeneration} onRegenerate={onReset} />
+      {status === "error" && (
+        <div className="flex flex-1 items-center justify-center px-8 py-16">
+          <ErrorState message={errorMessage} onReset={onReset} />
+        </div>
       )}
     </section>
+  );
+}
+
+function ErrorState({
+  message,
+  onReset,
+}: {
+  message: string | null;
+  onReset: () => void;
+}) {
+  return (
+    <div className="flex max-w-md flex-col items-center text-center">
+      <span className="flex items-center gap-2 font-mono text-[0.7rem] uppercase tracking-[0.25em] text-faint">
+        <span className="h-px w-6 bg-petrol" aria-hidden />
+        Something broke
+      </span>
+
+      <h2 className="mt-6 font-display text-3xl font-medium leading-tight text-ink sm:text-4xl">
+        The press jammed
+      </h2>
+
+      <p className="mt-4 text-base leading-relaxed text-muted">
+        {message ?? "The generation failed. Try again."}
+      </p>
+
+      <button
+        type="button"
+        onClick={onReset}
+        className="mt-7 rounded-md bg-petrol px-5 py-2.5 text-sm font-medium text-canvas transition-colors hover:bg-petrol-bright"
+      >
+        Start over
+      </button>
+    </div>
   );
 }
 

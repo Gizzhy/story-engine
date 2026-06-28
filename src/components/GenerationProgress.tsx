@@ -1,12 +1,14 @@
 "use client";
 
-import type { JobStatus, StorySegment } from "@/lib/types";
+import type { JobSegment, JobStatus } from "@/lib/types";
+import type { WriteProgress } from "@/lib/useGeneration";
 
 interface GenerationProgressProps {
   status: JobStatus;
-  totalSegments: number;
-  /** Segments revealed so far; the writing progress derives from this. */
-  completed?: StorySegment[];
+  /** Narration segments streamed onto the doc so far. */
+  segments: JobSegment[];
+  /** Writing progress from the doc; null until the writing stage. */
+  writeProgress: WriteProgress | null;
   onCancel: () => void;
 }
 
@@ -30,16 +32,17 @@ const STEP_INDEX: Record<string, number> = {
  */
 export default function GenerationProgress({
   status,
-  totalSegments,
-  completed = [],
+  segments,
+  writeProgress,
   onCancel,
 }: GenerationProgressProps) {
   const activeStep = STEP_INDEX[status] ?? 0;
   const writing = status === "writing";
+  const current = writeProgress?.current ?? 0;
+  const total = writeProgress?.total ?? 0;
   // The segment currently being written = one past the last finished one.
-  const writingIndex = Math.min(completed.length + 1, totalSegments);
-  const segmentFraction =
-    totalSegments > 0 ? Math.min(completed.length / totalSegments, 1) : 0;
+  const writingIndex = total > 0 ? Math.min(current + 1, total) : 1;
+  const segmentFraction = total > 0 ? Math.min(current / total, 1) : 0;
 
   return (
     <div className="md:h-full md:overflow-y-auto">
@@ -106,8 +109,7 @@ export default function GenerationProgress({
           <div>
             <div className="flex items-baseline justify-between">
               <span className="text-sm text-muted">
-                Segment {writingIndex} of{" "}
-                {totalSegments}
+                Segment {writingIndex} of {total}
               </span>
               <span className="font-mono text-xs tabular-nums text-faint">
                 {Math.round(segmentFraction * 100)}%
@@ -124,7 +126,7 @@ export default function GenerationProgress({
 
         {/* Live build area */}
         <div className="min-h-48 rounded-lg border border-line bg-surface/60 p-6">
-          {completed.length === 0 ? (
+          {segments.length === 0 ? (
             <p className="text-sm leading-relaxed text-faint">
               {writing
                 ? "Finished segments will appear here as they're written."
@@ -132,7 +134,7 @@ export default function GenerationProgress({
             </p>
           ) : (
             <div className="flex flex-col gap-6">
-              {completed.map((segment) => (
+              {segments.map((segment) => (
                 <p
                   key={segment.index}
                   className="font-reading text-base leading-[1.8] text-ink/90"

@@ -34,19 +34,47 @@ export interface SegmentPlan {
   endsOn: string;
 }
 
+/** Auto-generated brief carried from the blueprint into every segment. */
+export interface StoryBrief {
+  genre: string;
+  setting: string;
+  /** POV + tense inherited from the source DNA, e.g. "first-person past tense". */
+  narrativePOV: string;
+  premise: string;
+}
+
+/** A cast member defined up front in the blueprint; names are for the script only. */
+export interface BlueprintCharacter {
+  name: string;
+  /** "lead" | "supporting". */
+  role: string;
+  age: string;
+  relationship: string;
+  traits: string;
+  arc: string;
+}
+
 /** Stage 2 output: the cheap-to-regenerate plan the user reviews before writing. */
 export interface Blueprint {
+  storyBrief: StoryBrief;
   titleOptions: string[];
   logline: string;
-  premise: string;
-  setting: string;
-  characters: {
-    name: string;
-    role: string;
-    traits: string;
-    arc: string;
-  }[];
+  characters: BlueprintCharacter[];
   segments: SegmentPlan[];
+}
+
+/** Stage 1 output: the abstracted structural pattern of the source. */
+export interface Dna {
+  genre: string;
+  subgenre: string;
+  premiseArchetype: string;
+  hookMechanism: string;
+  titleFormula: string;
+  narrativePOV: string;
+  tone: string[];
+  pacingStyle: string;
+  emotionalArc: string[];
+  audience: string;
 }
 
 /**
@@ -109,3 +137,43 @@ export type JobStatus =
   | 'writing'
   | 'done'
   | 'error';
+
+/** One finished narration segment as written by the pipeline (prose only). */
+export interface JobSegment {
+  index: number;
+  text: string;
+}
+
+/** Stage 4 continuity ledger, threaded between segments to keep a long story consistent. */
+export interface StateLedger {
+  summarySoFar: string;
+  characters: { name: string; role: string; traits: string; status: string }[];
+  establishedFacts: string[];
+  openThreads: string[];
+  currentScene: { location: string; timeframe: string; moodAtSegmentEnd: string };
+  lastParagraph: string;
+}
+
+/**
+ * The live Firestore job document the client subscribes to. Artifacts fill in
+ * as the pipeline advances: `dna` after analyzing, `blueprint` after planning,
+ * then the writing stage streams `segments` (tracked by `writeProgress`) and
+ * maintains the `ledger`, finally assembling `generation`.
+ */
+export interface Job {
+  id?: string;
+  status: JobStatus;
+  input: GenerationInput;
+  dna?: Dna;
+  blueprint?: Blueprint;
+  /** The title the user picked in blueprint review, flowed downstream. */
+  chosenTitle?: string;
+  /** Finished narration segments streamed during the writing stage. */
+  segments?: JobSegment[];
+  /** Running continuity ledger maintained after each segment. */
+  ledger?: StateLedger;
+  /** Writing progress for the live "Segment X of N" view. */
+  writeProgress?: { current: number; total: number };
+  generation?: Generation;
+  error?: string;
+}

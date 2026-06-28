@@ -5,7 +5,7 @@ import type { Blueprint } from "@/lib/types";
 
 interface BlueprintReviewProps {
   blueprint: Blueprint;
-  onApprove: () => void;
+  onApprove: (chosenTitle: string) => void;
   onRegenerate: () => void;
 }
 
@@ -65,13 +65,13 @@ export default function BlueprintReview({
             {blueprint.logline}
           </p>
           <p className="mt-4 font-reading text-base leading-relaxed text-ink/80">
-            {blueprint.premise}
+            {blueprint.storyBrief.premise}
           </p>
           <p className="mt-4 text-sm leading-relaxed text-muted">
             <span className="font-mono text-[0.7rem] uppercase tracking-[0.15em] text-faint">
               Setting&nbsp;
             </span>
-            {blueprint.setting}
+            {blueprint.storyBrief.setting}
           </p>
         </div>
 
@@ -145,7 +145,7 @@ export default function BlueprintReview({
           </button>
           <button
             type="button"
-            onClick={onApprove}
+            onClick={() => onApprove(selectedTitle)}
             className="rounded-md bg-petrol px-5 py-2.5 text-sm font-medium text-canvas transition-colors hover:bg-petrol-bright"
           >
             Approve &amp; write

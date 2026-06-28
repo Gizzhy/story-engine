@@ -14,29 +14,39 @@ const TITLE_OPTIONS = [
 ];
 
 export const mockBlueprint: Blueprint = {
+  storyBrief: {
+    genre: 'Supernatural mystery · slow-burn thriller',
+    setting:
+      'The Glasswater Hotel, a fog-bound alpine resort past its prime, in the dead hours between midnight and dawn. Long carpeted corridors, a brass-keyed front desk, a basement records room, and an elevator that only the night staff still trust.',
+    narrativePOV: 'First-person past tense',
+    premise:
+      'The Glasswater is a once-grand resort kept alive by a single, impossible occupancy. Room 9 is paid through in cash, never serviced, never disturbed. The new auditor is told only one rule: the room is full, the room is fine, leave it be. When the building starts answering questions he never asks aloud, he has to decide whether the hotel is haunted by a guest — or by the people who keep covering for one.',
+  },
   titleOptions: TITLE_OPTIONS,
   logline:
     'A burned-out night auditor takes a quiet graveyard shift at a failing mountain hotel, only to discover that its most loyal guest has been checking into the same room every night for thirty years — and that the job he was really hired for is to make sure no one ever asks why.',
-  premise:
-    'The Glasswater is a once-grand resort kept alive by a single, impossible occupancy. Room 9 is paid through in cash, never serviced, never disturbed. The new auditor is told only one rule: the room is full, the room is fine, leave it be. When the building starts answering questions he never asks aloud, he has to decide whether the hotel is haunted by a guest — or by the people who keep covering for one.',
-  setting:
-    'The Glasswater Hotel, a fog-bound alpine resort past its prime, in the dead hours between midnight and dawn. Long carpeted corridors, a brass-keyed front desk, a basement records room, and an elevator that only the night staff still trust.',
   characters: [
     {
       name: 'Daniel Reese',
-      role: 'Narrator / night auditor',
+      role: 'lead',
+      age: 'Late 30s',
+      relationship: 'The newly hired night auditor; the narrator.',
       traits: 'Observant, insomniac, allergic to mysteries he cannot close.',
       arc: 'Arrives wanting nothing but a paycheck and silence; leaves having traded both for the truth.',
     },
     {
       name: 'Marguerite Vell',
-      role: 'Day manager who hired him',
+      role: 'supporting',
+      age: 'Early 60s',
+      relationship: 'The day manager who hired Daniel and guards the hotel.',
       traits: 'Composed, evasive, fiercely protective of the hotel.',
       arc: 'Reveals she is not hiding a ghost but a promise she made long ago.',
     },
     {
       name: 'The Guest in Room 9',
-      role: 'The standing occupancy',
+      role: 'supporting',
+      age: 'Indeterminate; appears to be Daniel’s double',
+      relationship: "The standing occupancy Daniel is unknowingly bound to.",
       traits: 'Never seen in full; known only by a light, a sound, a signature.',
       arc: 'Resolves from rumor into a person with a reason to stay.',
     },

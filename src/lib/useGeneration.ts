@@ -1,93 +1,182 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { JobStatus, StorySegment } from "./types";
-import { mockGeneration } from "./mock";
+import { httpsCallable } from "firebase/functions";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db, functions } from "./firebase";
+import type {
+  Blueprint,
+  Generation,
+  GenerationInput,
+  Job,
+  JobSegment,
+  JobStatus,
+} from "./types";
 
-// ── Simulated timing ────────────────────────────────────────────────────────
-// All fake-flow timing lives here. To go real, replace the scheduled
-// transitions with API/queue calls (kick off DNA extraction, poll the job,
-// subscribe to streamed segments) — the component contract stays the same.
-const ANALYZE_MS = 1500;
-const PLAN_MS = 1500;
-const SEGMENT_MS = 1000;
+const JOB_PARAM = "job";
+
+export interface WriteProgress {
+  current: number;
+  total: number;
+}
 
 export interface UseGeneration {
   status: JobStatus;
-  /** Segments revealed so far during the writing phase. */
-  completedSegments: StorySegment[];
-  /** Total segments in the run (drives "Segment X of N"). */
-  totalSegments: number;
-  /** Begin a run: analyzing → planning → blueprint_ready. */
-  start: () => void;
-  /** Approve the blueprint: writing → stream segments → done. */
-  approve: () => void;
-  /** Cancel / regenerate / start over — clears timers and returns to idle. */
+  /** The blueprint from the job doc, once status is 'blueprint_ready'. */
+  blueprint: Blueprint | null;
+  /** Error message from the job doc (or a client-side failure). */
+  errorMessage: string | null;
+  /** Narration segments streamed live onto the doc during 'writing'. */
+  segments: JobSegment[];
+  /** Writing progress for "Segment X of N". */
+  writeProgress: WriteProgress | null;
+  /** The finished generation from the doc, once status is 'done'. */
+  generation: Generation | null;
+  /** Begin a run: invoke startJob, then subscribe to the job doc. */
+  start: (input: GenerationInput) => Promise<void>;
+  /** Approve the blueprint: invoke approveJob; the doc's status drives the UI. */
+  approve: (chosenTitle: string) => Promise<void>;
+  /** Cancel / regenerate / start over — detaches and returns to idle. */
   reset: () => void;
 }
 
+function setJobInUrl(jobId: string | null) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (jobId) url.searchParams.set(JOB_PARAM, jobId);
+  else url.searchParams.delete(JOB_PARAM);
+  window.history.replaceState(null, "", url);
+}
+
 /**
- * Drives the whole fake generation journey off setTimeout. Status is held in
- * React state only, so a page refresh mid-flow simply remounts at 'idle' (no
- * persistence yet) — it can't crash. All pending timers are tracked and
- * cleared on reset and on unmount.
+ * Drives the whole generation journey off the live Firestore job doc. The Cloud
+ * Functions (startJob → onJobCreated → approveJob → writeSegment chain) own all
+ * the real work; the client just subscribes and reflects the doc's status,
+ * blueprint, streamed segments, progress, and final generation. Resumable via
+ * the ?job=<id> URL param — the work continues server-side regardless of the tab.
  */
 export function useGeneration(): UseGeneration {
   const [status, setStatus] = useState<JobStatus>("idle");
-  const [completedSegments, setCompletedSegments] = useState<StorySegment[]>(
-    [],
-  );
+  const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [segments, setSegments] = useState<JobSegment[]>([]);
+  const [writeProgress, setWriteProgress] = useState<WriteProgress | null>(null);
+  const [generation, setGeneration] = useState<Generation | null>(null);
 
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const unsubscribe = useRef<(() => void) | null>(null);
+  const jobIdRef = useRef<string | null>(null);
 
-  const clearTimers = useCallback(() => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
+  const detach = useCallback(() => {
+    unsubscribe.current?.();
+    unsubscribe.current = null;
   }, []);
 
-  const schedule = useCallback((fn: () => void, ms: number) => {
-    timers.current.push(setTimeout(fn, ms));
-  }, []);
-
-  // Clear any in-flight timers when the component using the hook unmounts.
-  useEffect(() => clearTimers, [clearTimers]);
-
-  const reset = useCallback(() => {
-    clearTimers();
-    setCompletedSegments([]);
-    setStatus("idle");
-  }, [clearTimers]);
-
-  const start = useCallback(() => {
-    clearTimers();
-    setCompletedSegments([]);
-    setStatus("analyzing");
-    schedule(() => setStatus("planning"), ANALYZE_MS);
-    schedule(() => setStatus("blueprint_ready"), ANALYZE_MS + PLAN_MS);
-  }, [clearTimers, schedule]);
-
-  const approve = useCallback(() => {
-    clearTimers();
-    setCompletedSegments([]);
-    setStatus("writing");
-
-    const segments = mockGeneration.segments;
-    segments.forEach((segment, i) => {
-      schedule(
-        () => {
-          setCompletedSegments((prev) => [...prev, segment]);
-          // After the final segment lands, settle into the finished story.
-          if (i === segments.length - 1) {
-            schedule(() => setStatus("done"), SEGMENT_MS);
+  // Subscribe to a job doc and reflect its fields onto the UI. Stays attached
+  // through 'writing' and 'done' so streamed segments and the final generation
+  // arrive live.
+  const subscribe = useCallback(
+    (jobId: string) => {
+      detach();
+      jobIdRef.current = jobId;
+      unsubscribe.current = onSnapshot(
+        doc(db, "jobs", jobId),
+        (snap) => {
+          const data = snap.data() as Job | undefined;
+          if (!data) return;
+          setStatus(data.status);
+          if (data.blueprint) setBlueprint(data.blueprint);
+          setSegments(data.segments ?? []);
+          setWriteProgress(data.writeProgress ?? null);
+          if (data.generation) setGeneration(data.generation);
+          if (data.status === "error") {
+            setErrorMessage(data.error ?? "Generation failed.");
           }
         },
-        SEGMENT_MS * (i + 1),
+        (err) => {
+          setStatus("error");
+          setErrorMessage(err.message);
+        },
       );
-    });
-  }, [clearTimers, schedule]);
+    },
+    [detach],
+  );
+
+  const resetState = useCallback(() => {
+    setBlueprint(null);
+    setErrorMessage(null);
+    setSegments([]);
+    setWriteProgress(null);
+    setGeneration(null);
+  }, []);
+
+  const start = useCallback(
+    async (input: GenerationInput) => {
+      detach();
+      resetState();
+      // Show the progress view immediately, bridging the gap until the first
+      // snapshot lands.
+      setStatus("analyzing");
+      try {
+        const startJob = httpsCallable<GenerationInput, { jobId: string }>(
+          functions,
+          "startJob",
+        );
+        const result = await startJob(input);
+        const jobId = result.data.jobId;
+        setJobInUrl(jobId);
+        subscribe(jobId);
+      } catch (err) {
+        setStatus("error");
+        setErrorMessage(
+          err instanceof Error ? err.message : "Failed to start generation.",
+        );
+      }
+    },
+    [detach, resetState, subscribe],
+  );
+
+  const approve = useCallback(async (chosenTitle: string) => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    try {
+      const approveJob = httpsCallable<
+        { jobId: string; chosenTitle: string },
+        { ok: boolean }
+      >(functions, "approveJob");
+      // Don't change status locally — the doc's status drives the UI.
+      await approveJob({ jobId, chosenTitle });
+    } catch (err) {
+      setStatus("error");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to start writing.",
+      );
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    detach();
+    jobIdRef.current = null;
+    resetState();
+    setJobInUrl(null);
+    setStatus("idle");
+  }, [detach, resetState]);
+
+  // Resume on mount: if the URL carries ?job=<id>, reattach. The first snapshot
+  // restores the UI to the doc's current status (incl. a job mid-'writing').
+  useEffect(() => {
+    const jobId =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get(JOB_PARAM)
+        : null;
+    if (jobId) subscribe(jobId);
+    return () => detach();
+  }, [subscribe, detach]);
 
   return {
     status,
-    completedSegments,
-    totalSegments: mockGeneration.segments.length,
+    blueprint,
+    errorMessage,
+    segments,
+    writeProgress,
+    generation,
     start,
     approve,
     reset,

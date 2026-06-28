@@ -22,10 +22,18 @@ export default function StudioPage() {
   const updateInput = (patch: Partial<GenerationInput>) =>
     setInput((prev) => ({ ...prev, ...patch }));
 
-  // The simulated pipeline owns `status` and the streamed segments. Swap the
-  // hook's internals for real API calls later — this wiring won't change.
-  const { status, completedSegments, totalSegments, start, approve, reset } =
-    useGeneration();
+  // The whole pipeline runs server-side; we just reflect the live job doc.
+  const {
+    status,
+    blueprint,
+    errorMessage,
+    segments,
+    writeProgress,
+    generation,
+    start,
+    approve,
+    reset,
+  } = useGeneration();
 
   // Generate is gated until the transcript clears the minimum.
   const isValid = countWords(input.sourceTranscript) >= MIN_TRANSCRIPT_WORDS;
@@ -36,13 +44,16 @@ export default function StudioPage() {
         input={input}
         updateInput={updateInput}
         status={status}
-        onGenerate={start}
+        onGenerate={() => start(input)}
         isValid={isValid}
       />
       <ResultsCanvas
         status={status}
-        completedSegments={completedSegments}
-        totalSegments={totalSegments}
+        blueprint={blueprint}
+        errorMessage={errorMessage}
+        segments={segments}
+        writeProgress={writeProgress}
+        generation={generation}
         onApprove={approve}
         onReset={reset}
       />
