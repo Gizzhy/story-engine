@@ -171,21 +171,29 @@ export const mockGeneration: Generation = {
   characters: [
     {
       name: 'Daniel August Reese',
-      role: 'Narrator · night auditor',
-      imagePrompt:
-        "Character reference, photorealistic cinematic portrait: a lean man in his late thirties with tired, watchful insomniac eyes, short dark hair going grey at the temples, three-day stubble, a plain charcoal overcoat over a rumpled button-down, the worn look of someone who lives at night. Calm but haunted expression, soft moody key light against a neutral dark background, muted teal-and-amber palette, consistent lighting for reuse across scenes, 35mm film grain.",
+      identity:
+        "A lean man in his late thirties with tired, watchful insomniac eyes, short dark hair going grey at the temples, three-day stubble, fair skin, a narrow face with sharp cheekbones — the worn look of someone who lives at night.",
+      baselineOutfit:
+        "A plain charcoal overcoat over a rumpled white button-down shirt.",
+      referencePrompt:
+        "A lean man in his late thirties with tired, watchful insomniac eyes, short dark hair going grey at the temples, three-day stubble, fair skin, a narrow face with sharp cheekbones. Wearing a plain charcoal overcoat over a rumpled white button-down shirt.\n\nStyle: photorealistic, ultra-cinematic, 16:9 widescreen; eye-level, shallow depth of field, sharp focus; lighting — muted teal-and-amber, low-key cinematic intensity; ultra-realistic 8K detail, photorealistic skin texture, neutral color grading.",
     },
     {
       name: 'Marguerite Vell',
-      role: 'Day manager',
-      imagePrompt:
-        "Character reference, photorealistic cinematic portrait: a composed woman in her early sixties, silver hair in a low neat twist, sharp attentive eyes, a tailored wool cardigan over a high-collared blouse, a small brass key pinned at her lapel. Guarded, dignified, quietly protective expression, warm soft lobby lighting against a neutral dark background, muted palette, consistent lighting for reuse, fine detail.",
+      identity:
+        "A composed woman in her early sixties, silver hair in a low neat twist, sharp attentive grey eyes, pale lined skin, a dignified oval face.",
+      baselineOutfit:
+        "A tailored charcoal wool cardigan over a high-collared cream blouse, a small brass key pinned at the lapel.",
+      referencePrompt:
+        "A composed woman in her early sixties, silver hair in a low neat twist, sharp attentive grey eyes, pale lined skin, a dignified oval face. Wearing a tailored charcoal wool cardigan over a high-collared cream blouse, a small brass key pinned at the lapel.\n\nStyle: photorealistic, ultra-cinematic, 16:9 widescreen; eye-level, shallow depth of field, sharp focus; lighting — muted teal-and-amber, low-key cinematic intensity; ultra-realistic 8K detail, photorealistic skin texture, neutral color grading.",
     },
     {
       name: 'The Guest in Room 9',
-      role: 'The standing occupancy',
-      imagePrompt:
-        "Character reference, photorealistic cinematic portrait: a man who uncannily resembles Daniel — the same jaw, the same insomniac eyes — but older and utterly settled, in a soft worn cardigan, seated by a warm reading lamp with a book. Patient, kind, unsettlingly serene expression, warm amber lamplight against deep shadow, intimate uncanny mood, consistent lighting for reuse as a doppelganger reference, subtle film grain.",
+      identity:
+        "A man who uncannily resembles Daniel — the same jaw, the same insomniac eyes — but older, with greying hair and a settled, serene expression; fair skin, a calm lined face.",
+      baselineOutfit: "A soft, worn brown cardigan over a plain shirt.",
+      referencePrompt:
+        "A man who uncannily resembles Daniel — the same jaw, the same insomniac eyes — but older, with greying hair and a settled, serene expression; fair skin, a calm lined face. Wearing a soft, worn brown cardigan over a plain shirt.\n\nStyle: photorealistic, ultra-cinematic, 16:9 widescreen; eye-level, shallow depth of field, sharp focus; lighting — muted teal-and-amber, low-key cinematic intensity; ultra-realistic 8K detail, photorealistic skin texture, neutral color grading.",
     },
   ],
   scenes: [],

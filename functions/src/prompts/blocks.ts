@@ -42,3 +42,50 @@ export const PREMISE_DISTANCE: Record<number, string> = {
   5: `ORIGINAL FROM TITLE. Keep only the title formula and beat structure. Invent a
       completely original story; do not let the source's content show through at all.`,
 };
+
+// Style Block A — Default Cinematic Realism (characters + scenes).
+// {MOOD} is the one line that gets swapped per project to retheme the look.
+export const STYLE_BLOCK_A = (mood: string) => `
+Style: photorealistic, ultra-cinematic, shot in 16:9 widescreen.
+Camera & Composition — eye-level perspective; balanced cinematic composition; appropriate
+wide or medium framing; shallow depth of field; sharp focus on the characters; no lens distortion.
+Lighting — ${mood}.
+Rendering & Quality — ultra-realistic, 8K, ultra-sharp detail; photorealistic skin texture;
+realistic fabric folds; clean, well-composed environment; neutral color grading; high-end photography.
+`.trim();
+
+export const WHISK_RULES = `
+Whisk consistency rules:
+- Facial features stay identical across every image; preserve each character's distinct
+  physical and ethnic features exactly as defined.
+- Whisk has no memory: re-describe every character in full every time. Never summarize or
+  refer back ("the man from before").
+- Never include character names in image prompts.
+- Include only the characters actually present in the scene, not the whole cast.
+- Write prompts that pass Whisk's content guidelines.
+`;
+
+// "Real photo, no-CGI" aesthetic — RESERVED FOR THE THUMBNAIL ONLY. Characters and scenes
+// always use Style Block A; mixing the two looks inside the story body breaks consistency.
+export const CAMERA_REALISM = `
+Shot on Sony A7R V, 85mm f/1.4 lens, real-location photography. No CGI, no rendering, no
+cartoon, no 3D modeling, no artificial smoothing. Real human faces, natural skin texture,
+authentic expressions.
+`;
+
+export const CLOTHING_RULES = `
+Clothing & styling rules:
+- Every scene specifies each present character's outfit, appropriate to that scene.
+- Outfits change with the day, location, or context (work clothes at work, home clothes at home,
+  casual when out, formal for events) — the way real people re-dress.
+- Style each character to fit their personality, status, and the story's setting and era; reach
+  for current, on-trend looks unless the story dictates otherwise.
+- If the story specifies an outfit, use it; otherwise dress them for the scene rather than
+  repeating one look.
+`;
+
+// Style Block B — Hook / Intro (warmer, more dramatic). Used ONLY by hooks.
+export const STYLE_BLOCK_B = `
+Cinematic lighting, high contrast, warm tones, dramatic shadows, ultra-realistic, 8K film still,
+depth of field, emotional storytelling, volumetric light, richly colored.
+`.trim();

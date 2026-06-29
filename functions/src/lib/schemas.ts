@@ -68,6 +68,75 @@ export const StateLedgerSchema = z.object({
   lastParagraph: z.string(),
 });
 
+// ── Visual sections ─────────────────────────────────────────────────────────
+
+const OutfitSchema = z.object({ name: z.string(), outfit: z.string() });
+
+// Phase 1 — Characters.
+export const CharactersSchema = z.object({
+  characters: z.array(
+    z.object({
+      name: z.string(),
+      identity: z.string(),
+      baselineOutfit: z.string(),
+    }),
+  ),
+});
+
+// Phase 2 — Scenes (one splitter call per segment).
+export const ScenesSchema = z.object({
+  scenes: z.array(
+    z.object({
+      type: z.string(),
+      motionPriority: z.string(),
+      motion: z.string(),
+      narrationExcerpt: z.string(),
+      setting: z.string(),
+      action: z.string(),
+      present: z.array(z.string()),
+      outfits: z.array(OutfitSchema),
+    }),
+  ),
+  wardrobe: z.record(
+    z.string(),
+    z.object({ currentOutfit: z.string(), context: z.string() }),
+  ),
+});
+
+// Phase 3 — Hooks (cold open).
+export const HooksSchema = z.object({
+  suggestedHookCount: z.number(),
+  teaserLine: z.string(),
+  hooks: z.array(
+    z.object({
+      index: z.number(),
+      shot: z.string(),
+      motion: z.string(),
+      present: z.array(z.string()),
+      outfits: z.array(OutfitSchema),
+    }),
+  ),
+});
+
+// Phase 4 — Thumbnail.
+export const ThumbnailSchema = z.object({
+  concept: z.string(),
+  featured: z.array(z.string()),
+  outfit: z.array(OutfitSchema),
+});
+
+// Phase 5 — Metadata.
+export const MetadataSchema = z.object({
+  description: z.string(),
+  tags: z.array(z.string()).length(20),
+  hashtags: z.array(z.string()).length(10),
+});
+
 export type Dna = z.infer<typeof DnaSchema>;
 export type Blueprint = z.infer<typeof BlueprintSchema>;
 export type StateLedger = z.infer<typeof StateLedgerSchema>;
+export type Characters = z.infer<typeof CharactersSchema>;
+export type Scenes = z.infer<typeof ScenesSchema>;
+export type Hooks = z.infer<typeof HooksSchema>;
+export type Thumbnail = z.infer<typeof ThumbnailSchema>;
+export type Metadata = z.infer<typeof MetadataSchema>;

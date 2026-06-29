@@ -89,11 +89,36 @@ export interface StorySegment {
   imagePrompt: string;
 }
 
-/** A recurring cast member, with a reusable character-reference image prompt. */
+/** A cast member's locked visual identity for the image pipeline (Phase 1). */
 export interface Character {
+  /** Cast name — for keying only; never appears in prompt text. */
   name: string;
-  role: string;
-  /** Prompt for a consistent, reusable character reference image. */
+  /** Immutable, clothing-free physical lock — reused verbatim in every scene. */
+  identity: string;
+  /** Representative outfit for the reference portrait only (scenes override). */
+  baselineOutfit: string;
+  /** Assembled Whisk-ready reference prompt (identity + outfit + Style Block A). */
+  referencePrompt: string;
+}
+
+/** A visual moment split from the narration; one image per scene (Phase 2). */
+export interface Scene {
+  /** Global running index across the whole story. */
+  index: number;
+  /** "narrated" | "bridge". */
+  type: string;
+  /** "ambient" | "animate". */
+  motionPriority: string;
+  /** For 'animate' scenes only — what moves and how; empty otherwise. */
+  motion: string;
+  /** The narration line(s) this illustrates (empty for a bridge shot). */
+  narrationExcerpt: string;
+  setting: string;
+  action: string;
+  /** Cast names present — for keying only. */
+  present: string[];
+  outfits: { name: string; outfit: string }[];
+  /** Assembled Whisk-ready scene prompt (setting + action + identities + Style Block A). */
   imagePrompt: string;
 }
 
@@ -119,8 +144,8 @@ export interface Generation {
   suggestedHookCount: number;
   /** Click-optimised prompt for the video thumbnail image. */
   thumbnailPrompt: string;
-  /** LATER: a scene-splitter pass populates these with imagePrompts. */
-  scenes: unknown[];
+  /** Scenes split from the narration by the Phase 2 splitter pass. */
+  scenes: Scene[];
   description?: string;
   /** SEO keyword tags. */
   tags?: string[];
@@ -178,6 +203,26 @@ export interface Job {
   ledger?: StateLedger;
   /** Writing progress for the live "Segment X of N" view. */
   writeProgress?: { current: number; total: number };
+  /** Project visual mood, derived once and reused by every visual section. */
+  styleMood?: string;
+  /** Lifecycle of the visual phase (characters → scenes → … → metadata). */
+  visualStatus?: VisualStatus;
+  /** Scene-splitting progress (per segment) for a live "Scene X of N" view. */
+  sceneProgress?: { current: number; total: number };
+  /** Scenes keyed by segment index — one splitter call's output per segment. */
+  scenesBySegment?: Record<string, Scene[]>;
+  /** The finished deliverable; the visual fields land here as they're produced. */
   generation?: Generation;
   error?: string;
 }
+
+/** Lifecycle of the visual phase, mirroring the section order. */
+export type VisualStatus =
+  | 'styling'
+  | 'characters'
+  | 'scenes'
+  | 'hooks'
+  | 'thumbnail'
+  | 'metadata'
+  | 'done'
+  | 'error';
