@@ -9,6 +9,7 @@ import type {
   Job,
   JobSegment,
   JobStatus,
+  Scene,
   VisualStatus,
 } from "./types";
 
@@ -35,6 +36,8 @@ export interface UseGeneration {
   visualStatus: VisualStatus | null;
   /** Scene-splitting progress for "Scene X of N". */
   sceneProgress: WriteProgress | null;
+  /** Scenes keyed by segment index — used to anchor scenes to their segment. */
+  scenesBySegment: Record<string, Scene[]> | null;
   /** Begin a run: invoke startJob, then subscribe to the job doc. */
   start: (input: GenerationInput) => Promise<void>;
   /** Approve the blueprint: invoke approveJob; the doc's status drives the UI. */
@@ -81,6 +84,10 @@ export function useGeneration(): UseGeneration {
   const [generation, setGeneration] = useState<Generation | null>(null);
   const [visualStatus, setVisualStatus] = useState<VisualStatus | null>(null);
   const [sceneProgress, setSceneProgress] = useState<WriteProgress | null>(null);
+  const [scenesBySegment, setScenesBySegment] = useState<Record<
+    string,
+    Scene[]
+  > | null>(null);
 
   const unsubscribe = useRef<(() => void) | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -109,6 +116,7 @@ export function useGeneration(): UseGeneration {
           if (data.generation) setGeneration(data.generation);
           setVisualStatus(data.visualStatus ?? null);
           setSceneProgress(data.sceneProgress ?? null);
+          setScenesBySegment(data.scenesBySegment ?? null);
           // Either the main job or the visual phase can carry an error message.
           if (data.status === "error" || data.visualStatus === "error") {
             setErrorMessage(data.error ?? "Generation failed.");
@@ -131,6 +139,7 @@ export function useGeneration(): UseGeneration {
     setGeneration(null);
     setVisualStatus(null);
     setSceneProgress(null);
+    setScenesBySegment(null);
   }, []);
 
   const start = useCallback(
@@ -223,6 +232,7 @@ export function useGeneration(): UseGeneration {
     generation,
     visualStatus,
     sceneProgress,
+    scenesBySegment,
     start,
     approve,
     generateVisuals,

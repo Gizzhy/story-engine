@@ -3,6 +3,7 @@ import type {
   Generation,
   JobSegment,
   JobStatus,
+  Scene,
   VisualStatus,
 } from "@/lib/types";
 import type { WriteProgress } from "@/lib/useGeneration";
@@ -21,6 +22,7 @@ interface ResultsCanvasProps {
   generation: Generation | null;
   visualStatus: VisualStatus | null;
   sceneProgress: WriteProgress | null;
+  scenesBySegment: Record<string, Scene[]> | null;
   onApprove: (chosenTitle: string) => void;
   onGenerateVisuals: () => void;
   onReset: () => void;
@@ -40,6 +42,7 @@ export default function ResultsCanvas({
   generation,
   visualStatus,
   sceneProgress,
+  scenesBySegment,
   onApprove,
   onGenerateVisuals,
   onReset,
@@ -71,6 +74,7 @@ export default function ResultsCanvas({
           generation={generation}
           visualStatus={visualStatus}
           sceneProgress={sceneProgress}
+          scenesBySegment={scenesBySegment}
           errorMessage={errorMessage}
           onGenerateVisuals={onGenerateVisuals}
           onRegenerate={onReset}

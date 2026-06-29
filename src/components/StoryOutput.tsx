@@ -1,16 +1,77 @@
 "use client";
 
 import { useState } from "react";
-import type { Generation, VisualStatus } from "@/lib/types";
+import type { Generation, Scene, VisualStatus } from "@/lib/types";
 import type { WriteProgress } from "@/lib/useGeneration";
 
 interface StoryOutputProps {
   generation: Generation;
   visualStatus: VisualStatus | null;
   sceneProgress: WriteProgress | null;
+  scenesBySegment: Record<string, Scene[]> | null;
   errorMessage: string | null;
   onGenerateVisuals: () => void;
   onRegenerate: () => void;
+}
+
+/** End offset of `excerpt` within `text` (whitespace-tolerant), or null. */
+function findExcerptEnd(text: string, excerpt: string): number | null {
+  const needle = excerpt.trim();
+  if (needle.length < 8) return null; // too short / empty (e.g. bridge shots)
+
+  const exact = text.indexOf(needle);
+  if (exact >= 0) return exact + needle.length;
+
+  const toRegex = (s: string) =>
+    s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+
+  // Whitespace-tolerant match on the excerpt, then on just its head.
+  for (const probe of [needle, needle.slice(0, 60).trim()]) {
+    if (probe.length < 12) continue;
+    try {
+      const m = new RegExp(toRegex(probe)).exec(text);
+      if (m) return m.index + m[0].length;
+    } catch {
+      // Ignore a malformed regex and fall through.
+    }
+  }
+  return null;
+}
+
+type InlineNode =
+  | { kind: "text"; text: string }
+  | { kind: "scene"; scene: Scene };
+
+/**
+ * Interleave a segment's text with its scenes, anchoring each scene right after
+ * the passage its narrationExcerpt matches. Scenes whose excerpt can't be
+ * located fall back to the end of the segment (in index order) so none is lost.
+ */
+function buildSegmentNodes(text: string, scenes: Scene[]): InlineNode[] {
+  const matched: { scene: Scene; end: number }[] = [];
+  const unmatched: Scene[] = [];
+  for (const scene of scenes) {
+    const end = findExcerptEnd(text, scene.narrationExcerpt);
+    if (end == null) unmatched.push(scene);
+    else matched.push({ scene, end });
+  }
+  matched.sort((a, b) => a.end - b.end || a.scene.index - b.scene.index);
+
+  const nodes: InlineNode[] = [];
+  let cursor = 0;
+  for (const { scene, end } of matched) {
+    const at = Math.max(end, cursor);
+    if (at > cursor) {
+      nodes.push({ kind: "text", text: text.slice(cursor, at) });
+      cursor = at;
+    }
+    nodes.push({ kind: "scene", scene });
+  }
+  if (cursor < text.length) {
+    nodes.push({ kind: "text", text: text.slice(cursor) });
+  }
+  for (const scene of unmatched) nodes.push({ kind: "scene", scene });
+  return nodes;
 }
 
 const VISUAL_STEPS: { key: VisualStatus; label: string }[] = [
@@ -41,12 +102,15 @@ export default function StoryOutput({
   generation,
   visualStatus,
   sceneProgress,
+  scenesBySegment,
   errorMessage,
   onGenerateVisuals,
   onRegenerate,
 }: StoryOutputProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showInlineScenes, setShowInlineScenes] = useState(true);
 
+  const segments = generation.segments;
   const characters = generation.characters ?? [];
   const scenes = generation.scenes ?? [];
   const hooks = generation.hooks ?? [];
@@ -62,6 +126,31 @@ export default function StoryOutput({
   const uniqueScenes = [
     ...new Map(scenes.map((s) => [s.index, s])).values(),
   ].sort((a, b) => a.index - b.index);
+
+  // Map each global scene index → its source segment, and group scenes by
+  // segment. generation.scenes is the flatten of scenesBySegment in segment
+  // order, so segment membership follows the per-segment counts.
+  const sceneToSegment = new Map<number, number>();
+  const scenesForSegment = new Map<number, Scene[]>();
+  if (scenesBySegment) {
+    let g = 0;
+    for (const seg of segments) {
+      const count = scenesBySegment[String(seg.index)]?.length ?? 0;
+      const group: Scene[] = [];
+      for (let k = 0; k < count; k++) {
+        const scene = uniqueScenes.find((s) => s.index === g);
+        if (scene) {
+          sceneToSegment.set(g, seg.index);
+          group.push(scene);
+        }
+        g++;
+      }
+      scenesForSegment.set(seg.index, group);
+    }
+  }
+  // Any scenes we couldn't attribute to a segment (shouldn't happen).
+  const orphanScenes = uniqueScenes.filter((s) => !sceneToSegment.has(s.index));
+  const hasInlineScenes = uniqueScenes.length > 0;
 
   const visualsStarted = visualStatus != null;
   const visualsDone = visualStatus === "done";
@@ -133,23 +222,79 @@ export default function StoryOutput({
           </h1>
         </header>
 
-        {/* Body — segments joined into one continuous read */}
-        <div className="mt-10">
-          {generation.segments.map((segment, i) => (
-            <div key={segment.index}>
-              {i > 0 && (
-                <div
-                  className="my-9 text-center text-sm tracking-[0.5em] text-faint"
-                  aria-hidden
-                >
-                  · · ·
-                </div>
-              )}
-              <p className="font-reading text-lg leading-[1.8] text-ink/90 whitespace-pre-line">
-                {segment.text}
-              </p>
+        {/* Inline-scenes toggle (only once scenes exist) */}
+        {hasInlineScenes && (
+          <div className="mt-8 flex items-center justify-end">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showInlineScenes}
+              onClick={() => setShowInlineScenes((v) => !v)}
+              className="flex items-center gap-2.5"
+            >
+              <span className="text-sm text-muted">Show inline scenes</span>
+              <span
+                className={`relative h-5 w-9 rounded-full transition-colors ${
+                  showInlineScenes ? "bg-petrol" : "bg-ink/20"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${
+                    showInlineScenes ? "left-4.5" : "left-0.5"
+                  }`}
+                />
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Body — narration with each scene anchored to the passage it illustrates */}
+        <div className="mt-6">
+          {segments.map((segment, i) => {
+            const segScenes = scenesForSegment.get(segment.index) ?? [];
+            const nodes =
+              hasInlineScenes && showInlineScenes
+                ? buildSegmentNodes(segment.text, segScenes)
+                : [{ kind: "text" as const, text: segment.text }];
+            return (
+              <div key={segment.index}>
+                {i > 0 && <SegmentDivider index={segment.index} />}
+                {nodes.map((node, ni) =>
+                  node.kind === "text" ? (
+                    <p
+                      key={ni}
+                      className="font-reading text-lg leading-[1.8] text-ink/90 whitespace-pre-line"
+                    >
+                      {node.text}
+                    </p>
+                  ) : (
+                    <InlineScene
+                      key={`scene-${node.scene.index}`}
+                      scene={node.scene}
+                      segmentLabel={(sceneToSegment.get(node.scene.index) ?? segment.index) + 1}
+                      copied={copiedKey === `iscene-${node.scene.index}`}
+                      onCopy={() =>
+                        copy(`iscene-${node.scene.index}`, node.scene.imagePrompt)
+                      }
+                    />
+                  ),
+                )}
+              </div>
+            );
+          })}
+          {hasInlineScenes && showInlineScenes && orphanScenes.length > 0 && (
+            <div className="mt-6">
+              {orphanScenes.map((scene) => (
+                <InlineScene
+                  key={`scene-${scene.index}`}
+                  scene={scene}
+                  segmentLabel={null}
+                  copied={copiedKey === `iscene-${scene.index}`}
+                  onCopy={() => copy(`iscene-${scene.index}`, scene.imagePrompt)}
+                />
+              ))}
             </div>
-          ))}
+          )}
         </div>
 
         {/* ── Visual phase ─────────────────────────────────────────── */}
@@ -254,7 +399,7 @@ export default function StoryOutput({
             loading("scenes", uniqueScenes.length > 0)) && (
             <section className="mt-10 border-t border-line pt-8">
               <SectionHead
-                title={`Scenes${uniqueScenes.length ? ` · ${uniqueScenes.length}` : ""}`}
+                title={`Scene prompts${uniqueScenes.length ? ` · ${uniqueScenes.length}` : ""}`}
                 action={
                   uniqueScenes.length > 0 && (
                     <GhostButton
@@ -272,6 +417,11 @@ export default function StoryOutput({
                   )
                 }
               />
+              {uniqueScenes.length > 0 && (
+                <p className="mt-1 text-xs text-faint">
+                  Flat batch list for pasting into Whisk.
+                </p>
+              )}
               {uniqueScenes.length === 0 ? (
                 <LoadingNote>
                   Splitting scenes…
@@ -461,6 +611,54 @@ export default function StoryOutput({
             </section>
           )}
       </article>
+    </div>
+  );
+}
+
+/** An image-prompt block anchored inline next to the narration it illustrates. */
+function InlineScene({
+  scene,
+  segmentLabel,
+  copied,
+  onCopy,
+}: {
+  scene: Scene;
+  segmentLabel: number | null;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div className="my-5 rounded-md border border-line border-l-2 border-l-petrol bg-surface/50 px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[0.6rem] uppercase tracking-[0.18em] text-petrol">
+          Scene {scene.index + 1}
+          {segmentLabel != null && (
+            <span className="ml-2 text-faint">S{segmentLabel}</span>
+          )}
+        </span>
+        <GhostButton onClick={onCopy}>{copied ? "Copied" : "Copy"}</GhostButton>
+      </div>
+      <p className="mt-1.5 font-mono text-xs leading-relaxed text-muted">
+        {scene.imagePrompt}
+      </p>
+      {scene.motionPriority === "animate" && scene.motion && (
+        <div className="mt-1 font-mono text-xs text-faint">
+          Motion: {scene.motion}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A faint, minimally labelled break between segments. */
+function SegmentDivider({ index }: { index: number }) {
+  return (
+    <div className="my-9 flex items-center gap-3" aria-hidden>
+      <span className="h-px flex-1 bg-line" />
+      <span className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-faint">
+        Segment {index + 1}
+      </span>
+      <span className="h-px flex-1 bg-line" />
     </div>
   );
 }

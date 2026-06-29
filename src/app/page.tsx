@@ -32,6 +32,7 @@ export default function StudioPage() {
     generation,
     visualStatus,
     sceneProgress,
+    scenesBySegment,
     start,
     approve,
     generateVisuals,
@@ -59,6 +60,7 @@ export default function StudioPage() {
         generation={generation}
         visualStatus={visualStatus}
         sceneProgress={sceneProgress}
+        scenesBySegment={scenesBySegment}
         onApprove={approve}
         onGenerateVisuals={generateVisuals}
         onReset={reset}
