@@ -93,6 +93,8 @@ export interface StorySegment {
 export interface Character {
   /** Cast name — for keying only; never appears in prompt text. */
   name: string;
+  /** "lead" | "supporting", carried from the blueprint cast. */
+  role?: string;
   /** Immutable, clothing-free physical lock — reused verbatim in every scene. */
   identity: string;
   /** Representative outfit for the reference portrait only (scenes override). */
@@ -140,6 +142,8 @@ export interface Generation {
   characters: Character[];
   /** Intro motion scenes — attention-grabbing opening shots. */
   hooks: HookScene[];
+  /** Single dramatic teaser line voiced across the cold-open montage. */
+  teaserLine?: string;
   /** The AI's recommendation for how many intro motion scenes suit this story. */
   suggestedHookCount: number;
   /** Click-optimised prompt for the video thumbnail image. */

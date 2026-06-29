@@ -3,6 +3,7 @@ import type {
   Generation,
   JobSegment,
   JobStatus,
+  VisualStatus,
 } from "@/lib/types";
 import type { WriteProgress } from "@/lib/useGeneration";
 import StoryOutput from "@/components/StoryOutput";
@@ -18,7 +19,10 @@ interface ResultsCanvasProps {
   segments: JobSegment[];
   writeProgress: WriteProgress | null;
   generation: Generation | null;
+  visualStatus: VisualStatus | null;
+  sceneProgress: WriteProgress | null;
   onApprove: (chosenTitle: string) => void;
+  onGenerateVisuals: () => void;
   onReset: () => void;
 }
 
@@ -34,7 +38,10 @@ export default function ResultsCanvas({
   segments,
   writeProgress,
   generation,
+  visualStatus,
+  sceneProgress,
   onApprove,
+  onGenerateVisuals,
   onReset,
 }: ResultsCanvasProps) {
   return (
@@ -60,7 +67,14 @@ export default function ResultsCanvas({
         />
       )}
       {status === "done" && generation && (
-        <StoryOutput generation={generation} onRegenerate={onReset} />
+        <StoryOutput
+          generation={generation}
+          visualStatus={visualStatus}
+          sceneProgress={sceneProgress}
+          errorMessage={errorMessage}
+          onGenerateVisuals={onGenerateVisuals}
+          onRegenerate={onReset}
+        />
       )}
       {status === "error" && (
         <div className="flex flex-1 items-center justify-center px-8 py-16">

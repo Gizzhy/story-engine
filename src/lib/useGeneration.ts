@@ -9,6 +9,7 @@ import type {
   Job,
   JobSegment,
   JobStatus,
+  VisualStatus,
 } from "./types";
 
 const JOB_PARAM = "job";
@@ -30,10 +31,16 @@ export interface UseGeneration {
   writeProgress: WriteProgress | null;
   /** The finished generation from the doc, once status is 'done'. */
   generation: Generation | null;
+  /** The visual phase lifecycle, once visuals have been kicked off. */
+  visualStatus: VisualStatus | null;
+  /** Scene-splitting progress for "Scene X of N". */
+  sceneProgress: WriteProgress | null;
   /** Begin a run: invoke startJob, then subscribe to the job doc. */
   start: (input: GenerationInput) => Promise<void>;
   /** Approve the blueprint: invoke approveJob; the doc's status drives the UI. */
   approve: (chosenTitle: string) => Promise<void>;
+  /** Kick off the visual phase: invoke generateVisuals; the doc drives the UI. */
+  generateVisuals: () => Promise<void>;
   /** Cancel / regenerate / start over — detaches and returns to idle. */
   reset: () => void;
 }
@@ -72,6 +79,8 @@ export function useGeneration(): UseGeneration {
   const [segments, setSegments] = useState<JobSegment[]>([]);
   const [writeProgress, setWriteProgress] = useState<WriteProgress | null>(null);
   const [generation, setGeneration] = useState<Generation | null>(null);
+  const [visualStatus, setVisualStatus] = useState<VisualStatus | null>(null);
+  const [sceneProgress, setSceneProgress] = useState<WriteProgress | null>(null);
 
   const unsubscribe = useRef<(() => void) | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -98,7 +107,10 @@ export function useGeneration(): UseGeneration {
           setSegments(orderedSegments(data.segmentsByIndex));
           setWriteProgress(data.writeProgress ?? null);
           if (data.generation) setGeneration(data.generation);
-          if (data.status === "error") {
+          setVisualStatus(data.visualStatus ?? null);
+          setSceneProgress(data.sceneProgress ?? null);
+          // Either the main job or the visual phase can carry an error message.
+          if (data.status === "error" || data.visualStatus === "error") {
             setErrorMessage(data.error ?? "Generation failed.");
           }
         },
@@ -117,6 +129,8 @@ export function useGeneration(): UseGeneration {
     setSegments([]);
     setWriteProgress(null);
     setGeneration(null);
+    setVisualStatus(null);
+    setSceneProgress(null);
   }, []);
 
   const start = useCallback(
@@ -163,6 +177,24 @@ export function useGeneration(): UseGeneration {
     }
   }, []);
 
+  const generateVisuals = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    try {
+      const callable = httpsCallable<{ jobId: string }, { ok: boolean }>(
+        functions,
+        "generateVisuals",
+      );
+      // Don't change state locally — the doc's visualStatus drives the UI.
+      await callable({ jobId });
+    } catch (err) {
+      setVisualStatus("error");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to start visuals.",
+      );
+    }
+  }, []);
+
   const reset = useCallback(() => {
     detach();
     jobIdRef.current = null;
@@ -189,8 +221,11 @@ export function useGeneration(): UseGeneration {
     segments,
     writeProgress,
     generation,
+    visualStatus,
+    sceneProgress,
     start,
     approve,
+    generateVisuals,
     reset,
   };
 }

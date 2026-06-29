@@ -30,8 +30,11 @@ export default function StudioPage() {
     segments,
     writeProgress,
     generation,
+    visualStatus,
+    sceneProgress,
     start,
     approve,
+    generateVisuals,
     reset,
   } = useGeneration();
 
@@ -54,7 +57,10 @@ export default function StudioPage() {
         segments={segments}
         writeProgress={writeProgress}
         generation={generation}
+        visualStatus={visualStatus}
+        sceneProgress={sceneProgress}
         onApprove={approve}
+        onGenerateVisuals={generateVisuals}
         onReset={reset}
       />
     </div>
