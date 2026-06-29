@@ -38,6 +38,18 @@ export interface UseGeneration {
   reset: () => void;
 }
 
+/** Sorted, deduped-by-index array from the writing-stage segment map. */
+function orderedSegments(
+  map: Record<string, JobSegment> | undefined,
+): JobSegment[] {
+  if (!map) return [];
+  const byIndex = new Map<number, JobSegment>();
+  for (const seg of Object.values(map)) {
+    if (seg && typeof seg.index === "number") byIndex.set(seg.index, seg);
+  }
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+}
+
 function setJobInUrl(jobId: string | null) {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
@@ -83,7 +95,7 @@ export function useGeneration(): UseGeneration {
           if (!data) return;
           setStatus(data.status);
           if (data.blueprint) setBlueprint(data.blueprint);
-          setSegments(data.segments ?? []);
+          setSegments(orderedSegments(data.segmentsByIndex));
           setWriteProgress(data.writeProgress ?? null);
           if (data.generation) setGeneration(data.generation);
           if (data.status === "error") {

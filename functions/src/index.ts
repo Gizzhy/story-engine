@@ -270,7 +270,9 @@ export const approveJob = onCall<{ jobId: string; chosenTitle: string }>(
     await jobRef.update({
       chosenTitle,
       status: "writing",
-      segments: [],
+      // Segments live in a map keyed by index (idempotent on retry); there is
+      // no top-level segments array during writing.
+      segmentsByIndex: {},
       ledger: emptyLedger(),
       writeProgress: { current: 0, total },
       updatedAt: FieldValue.serverTimestamp(),
@@ -284,10 +286,31 @@ export const approveJob = onCall<{ jobId: string; chosenTitle: string }>(
   },
 );
 
+type SegmentMap = Record<string, { index: number; text: string }>;
+
+interface JobDoc {
+  status: string;
+  input: GenerationInput;
+  blueprint?: Blueprint;
+  chosenTitle?: string;
+  segmentsByIndex?: SegmentMap;
+  ledger?: StateLedger;
+}
+
+/** Sorted, deduped-by-index array view of the segment map. */
+function orderedSegments(map: SegmentMap): { index: number; text: string }[] {
+  const byIndex = new Map<number, { index: number; text: string }>();
+  for (const seg of Object.values(map)) {
+    if (seg && typeof seg.index === "number") byIndex.set(seg.index, seg);
+  }
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+}
+
 /**
  * Write ONE segment, then chain to the next. Driven by Cloud Tasks so each
- * segment gets its own 300s budget. Idempotent: a retried task that finds the
- * segment already written (or the job no longer 'writing') simply returns.
+ * segment gets its own 300s budget. Idempotent by construction: segments are
+ * stored in a map keyed by index, and a retry that finds its index already
+ * present skips the (paid) Claude calls and just continues the chain.
  */
 export const writeSegment = onTaskDispatched<{
   jobId: string;
@@ -308,92 +331,89 @@ export const writeSegment = onTaskDispatched<{
       const snap = await jobRef.get();
       if (!snap.exists) return;
 
-      const data = snap.data() as {
-        status: string;
-        input: GenerationInput;
-        blueprint?: Blueprint;
-        chosenTitle?: string;
-        segments?: { index: number; text: string }[];
-        ledger?: StateLedger;
-      };
-
-      // Idempotency: don't double-write on Cloud Tasks retries.
+      const data = snap.data() as JobDoc;
       if (data.status !== "writing") return;
-      const existing = data.segments ?? [];
-      if (existing.some((s) => s.index === segmentIndex)) return;
 
       const blueprint = data.blueprint;
       if (!blueprint) return;
 
       const total = blueprint.segments.length;
-      const segmentBrief = blueprint.segments[segmentIndex];
-      const storyState = data.ledger ?? emptyLedger();
+      const map = data.segmentsByIndex ?? {};
 
-      const anthropic = new Anthropic({ apiKey: anthropicKey.value() });
+      // Idempotency guard: if this index already exists, skip generation
+      // entirely and just continue the chain (protects against retries).
+      if (!map[segmentIndex]) {
+        const segmentBrief = blueprint.segments[segmentIndex];
+        const storyState = data.ledger ?? emptyLedger();
 
-      // STAGE 3 — segment prose (plain text, no JSON).
-      const text = await generateText(
-        anthropic,
-        MODELS.segment,
-        3000,
-        segmentPrompt.system,
-        segmentPrompt.buildUser({
-          storyPlan: blueprint,
-          storyState,
-          segmentBrief,
-          segmentWordTarget: segmentBrief.wordTarget,
-        }),
-      );
+        const anthropic = new Anthropic({ apiKey: anthropicKey.value() });
 
-      // STAGE 4 — state update. A ledger hiccup must not fail the job: retry
-      // once (inside generateJson), else keep the previous ledger.
-      let ledger: StateLedger = storyState;
-      try {
-        ledger = await generateJson<StateLedger>(
+        // STAGE 3 — segment prose (plain text, no JSON).
+        const text = await generateText(
           anthropic,
-          MODELS.state,
-          1500,
-          statePrompt.system,
-          statePrompt.buildUser(storyState, text),
-          StateLedgerSchema,
+          MODELS.segment,
+          3000,
+          segmentPrompt.system,
+          segmentPrompt.buildUser({
+            storyPlan: blueprint,
+            storyState,
+            segmentBrief,
+            segmentWordTarget: segmentBrief.wordTarget,
+          }),
         );
-      } catch {
-        ledger = storyState;
+
+        // STAGE 4 — state update. A ledger hiccup must not fail the job: retry
+        // once (inside generateJson), else keep the previous ledger.
+        let ledger: StateLedger = storyState;
+        try {
+          ledger = await generateJson<StateLedger>(
+            anthropic,
+            MODELS.state,
+            1500,
+            statePrompt.system,
+            statePrompt.buildUser(storyState, text),
+            StateLedgerSchema,
+          );
+        } catch {
+          ledger = storyState;
+        }
+
+        // Write into the map at this index — overwrites on retry, never dupes.
+        // The value always carries its own `index`.
+        await jobRef.update({
+          [`segmentsByIndex.${segmentIndex}`]: { index: segmentIndex, text },
+          ledger,
+          "writeProgress.current": segmentIndex + 1,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
       }
 
-      // Atomically append the segment and advance progress.
-      await jobRef.update({
-        segments: FieldValue.arrayUnion({ index: segmentIndex, text }),
-        ledger,
-        "writeProgress.current": segmentIndex + 1,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-
+      // Continue the chain.
       if (segmentIndex + 1 < total) {
         await getFunctions()
           .taskQueue(WRITE_SEGMENT_QUEUE)
           .enqueue({ jobId, segmentIndex: segmentIndex + 1 });
-      } else {
-        // Last segment — assemble the finished generation.
-        const allSegments = [...existing, { index: segmentIndex, text }].sort(
-          (a, b) => a.index - b.index,
-        );
-        const wordCount = allSegments.reduce(
-          (sum, s) => sum + countWords(s.text),
-          0,
-        );
-        await jobRef.update({
-          generation: {
-            title: data.chosenTitle ?? "",
-            titleOptions: blueprint.titleOptions,
-            durationMinutes: data.input.durationMinutes,
-            wordCount,
-            segments: allSegments,
-          },
-          status: "done",
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+        return;
       }
+
+      // Last segment — re-read the map and assemble the one canonical array.
+      const fresh = (await jobRef.get()).data() as JobDoc;
+      const allSegments = orderedSegments(fresh.segmentsByIndex ?? {});
+      const wordCount = allSegments.reduce(
+        (sum, s) => sum + countWords(s.text),
+        0,
+      );
+      await jobRef.update({
+        generation: {
+          title: fresh.chosenTitle ?? "",
+          titleOptions: blueprint.titleOptions,
+          durationMinutes: fresh.input.durationMinutes,
+          wordCount,
+          segments: allSegments,
+        },
+        status: "done",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Segment write failed.";

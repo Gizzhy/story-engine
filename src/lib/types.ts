@@ -168,8 +168,12 @@ export interface Job {
   blueprint?: Blueprint;
   /** The title the user picked in blueprint review, flowed downstream. */
   chosenTitle?: string;
-  /** Finished narration segments streamed during the writing stage. */
-  segments?: JobSegment[];
+  /**
+   * Segments written during the writing stage, keyed by index (a map, not an
+   * array) so Cloud Tasks retries overwrite the same key instead of appending.
+   * The canonical ordered array lives on `generation.segments` once done.
+   */
+  segmentsByIndex?: Record<string, JobSegment>;
   /** Running continuity ledger maintained after each segment. */
   ledger?: StateLedger;
   /** Writing progress for the live "Segment X of N" view. */
