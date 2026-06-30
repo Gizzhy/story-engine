@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Fraunces, Newsreader } from "next/font/google";
 import "./globals.css";
+import { SITE_URL, SITE_NAME } from "@/lib/site";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,10 +27,43 @@ const newsreader = Newsreader({
   display: "swap",
 });
 
+const TITLE_DEFAULT = "Story Engine — Transcript to Story Script Generator";
+const DESCRIPTION =
+  "Turn a YouTube transcript into an original long-form story script, plus image prompts, hooks, a thumbnail, and metadata for faceless story channels.";
+
 export const metadata: Metadata = {
-  title: "Story Engine — Studio",
-  description:
-    "Turn a researched transcript into an original, narrated long-form story.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: TITLE_DEFAULT,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description: DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    title: TITLE_DEFAULT,
+    description: DESCRIPTION,
+    type: "website",
+    siteName: SITE_NAME,
+    url: "/",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: SITE_NAME,
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE_DEFAULT,
+    description: DESCRIPTION,
+    images: ["/og.png"],
+  },
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({

@@ -43,24 +43,21 @@ type InlineNode =
   | { kind: "scene"; scene: Scene };
 
 /**
- * Interleave a segment's text with its scenes, anchoring each scene right after
- * the passage its narrationExcerpt matches. Scenes whose excerpt can't be
- * located fall back to the end of the segment (in index order) so none is lost.
+ * Interleave a segment's text with its scenes. Scenes are rendered in STRICT
+ * ascending global-index order — never reordered. narrationExcerpt is only a
+ * finer hint to advance the split point forward (placing a scene after its
+ * paragraph); it can never move a scene earlier, so order is always 1,2,3…
+ *
+ * `scenes` MUST already be sorted ascending by global `index`.
  */
 function buildSegmentNodes(text: string, scenes: Scene[]): InlineNode[] {
-  const matched: { scene: Scene; end: number }[] = [];
-  const unmatched: Scene[] = [];
-  for (const scene of scenes) {
-    const end = findExcerptEnd(text, scene.narrationExcerpt);
-    if (end == null) unmatched.push(scene);
-    else matched.push({ scene, end });
-  }
-  matched.sort((a, b) => a.end - b.end || a.scene.index - b.scene.index);
-
   const nodes: InlineNode[] = [];
   let cursor = 0;
-  for (const { scene, end } of matched) {
-    const at = Math.max(end, cursor);
+  for (const scene of scenes) {
+    const end = findExcerptEnd(text, scene.narrationExcerpt);
+    // The split point may only move forward — this preserves index order even
+    // when an excerpt matches earlier in the text or doesn't match at all.
+    const at = end != null && end > cursor ? end : cursor;
     if (at > cursor) {
       nodes.push({ kind: "text", text: text.slice(cursor, at) });
       cursor = at;
@@ -70,7 +67,6 @@ function buildSegmentNodes(text: string, scenes: Scene[]): InlineNode[] {
   if (cursor < text.length) {
     nodes.push({ kind: "text", text: text.slice(cursor) });
   }
-  for (const scene of unmatched) nodes.push({ kind: "scene", scene });
   return nodes;
 }
 
@@ -110,7 +106,9 @@ export default function StoryOutput({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showInlineScenes, setShowInlineScenes] = useState(true);
 
-  const segments = generation.segments;
+  // Render segments in strict index order; the scene→segment mapping below also
+  // relies on this order (generation.scenes was flattened segment-by-segment).
+  const segments = [...generation.segments].sort((a, b) => a.index - b.index);
   const characters = generation.characters ?? [];
   const scenes = generation.scenes ?? [];
   const hooks = generation.hooks ?? [];
@@ -145,6 +143,8 @@ export default function StoryOutput({
         }
         g++;
       }
+      // Strictly ascending by global index (built in order, sorted defensively).
+      group.sort((a, b) => a.index - b.index);
       scenesForSegment.set(seg.index, group);
     }
   }
