@@ -87,9 +87,41 @@ function wordsPerScene(density: string | undefined): number {
   }
 }
 
+/** Thrown when a JSON response was cut off at max_tokens (unparseable). */
+export class TruncatedJsonError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TruncatedJsonError";
+  }
+}
+
+/** One Claude call; returns the joined text and the stop reason. */
+async function createMessage(
+  client: Anthropic,
+  model: string,
+  maxTokens: number,
+  system: string,
+  user: string,
+): Promise<{ text: string; stopReason: string | null }> {
+  const response = await client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }],
+  });
+  const text = response.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("");
+  // Anthropic's stop_reason === "max_tokens" is the equivalent of a
+  // finish_reason ceiling hit — the output was truncated.
+  return { text, stopReason: response.stop_reason ?? null };
+}
+
 /**
  * Call Claude for JSON, parse and validate it. Retries once on any
- * call/parse/validate failure; throws if the second attempt also fails.
+ * call/parse/validate failure. If the failure was caused by the response
+ * hitting the token ceiling, throws TruncatedJsonError (with clear logs);
+ * otherwise rethrows the underlying error.
  */
 async function generateJson<T>(
   client: Anthropic,
@@ -100,21 +132,32 @@ async function generateJson<T>(
   schema: z.ZodType<T>,
 ): Promise<T> {
   let lastError: unknown;
+  let truncated = false;
   for (let attempt = 0; attempt < 2; attempt++) {
+    let stopReason: string | null = null;
+    let length = 0;
     try {
-      const response = await client.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: "user", content: user }],
-      });
-      const text = response.content
-        .map((block) => (block.type === "text" ? block.text : ""))
-        .join("");
-      return schema.parse(parseJson(text));
+      const res = await createMessage(client, model, maxTokens, system, user);
+      stopReason = res.stopReason;
+      length = res.text.length;
+      return schema.parse(parseJson(res.text));
     } catch (error) {
       lastError = error;
+      const hitCeiling = stopReason === "max_tokens";
+      if (hitCeiling) truncated = true;
+      console.error(
+        `generateJson failed (model=${model}, attempt=${attempt + 1}, ` +
+          `stop_reason=${stopReason}, response_length=${length}, ` +
+          `hit_token_ceiling=${hitCeiling}, max_tokens=${maxTokens}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+      );
     }
+  }
+  if (truncated) {
+    throw new TruncatedJsonError(
+      `Response truncated at max_tokens (${maxTokens}) for model ${model}.`,
+    );
   }
   throw lastError;
 }
@@ -127,15 +170,20 @@ async function generateText(
   system: string,
   user: string,
 ): Promise<string> {
-  const response = await client.messages.create({
+  const { text, stopReason } = await createMessage(
+    client,
     model,
-    max_tokens: maxTokens,
+    maxTokens,
     system,
-    messages: [{ role: "user", content: user }],
-  });
-  return response.content
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("");
+    user,
+  );
+  if (stopReason === "max_tokens") {
+    console.warn(
+      `generateText hit max_tokens (${maxTokens}) for model ${model}; ` +
+        `prose may be truncated (length=${text.length}).`,
+    );
+  }
+  return text;
 }
 
 function countWords(text: string): number {
@@ -237,7 +285,7 @@ export const onJobCreated = onDocumentCreated(
       const blueprint = await generateJson<Blueprint>(
         anthropic,
         MODELS.blueprint,
-        4000,
+        8000,
         blueprintPrompt.system,
         blueprintPrompt.buildUser({
           dna,
@@ -263,7 +311,11 @@ export const onJobCreated = onDocumentCreated(
       });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Generation failed.";
+        error instanceof TruncatedJsonError
+          ? "The story plan was too long to generate — try a shorter duration or regenerate."
+          : error instanceof Error
+            ? error.message
+            : "Generation failed.";
       await jobRef.set(
         {
           status: "error",
@@ -406,7 +458,7 @@ export const writeSegment = onTaskDispatched<{
           ledger = await generateJson<StateLedger>(
             anthropic,
             MODELS.state,
-            1500,
+            2000,
             statePrompt.system,
             statePrompt.buildUser(storyState, text),
             StateLedgerSchema,
@@ -999,7 +1051,7 @@ export const generateThumbnail = onTaskDispatched<{ jobId: string }>(
         const parsed = await generateJson<Thumbnail>(
           anthropic,
           MODELS.thumbnail,
-          1500,
+          2000,
           thumbnailPrompt.system,
           thumbnailPrompt.buildUser({
             storyBrief: blueprint.storyBrief,
