@@ -4,17 +4,18 @@ The three closing sections. All reuse patterns already built; the only new share
 
 ---
 
-# Phase 3 — Hooks (Intro / Cold Open)
+# Phase 3 — Hooks (Intro / Cold Open) — TRAILER model
 
-The **cold open**: a 5–15 second montage that plays **before** the story's narration begins, to stop the scroll. It stands outside the script — no segment narration runs under it.
+The **cold open**: a montage that plays **before** the story's narration begins, to stop the scroll. It stands outside the script. Unlike the old atmospheric intro, hooks now read the **finished story** and cut a **trailer** — teasing the most charged moments, each carrying a voiceover line.
 
-**Key differences from scenes:**
-- **Generated as ONE coherent sequence**, not isolated shots. If multiple shots are suggested, they must flow as an escalating montage (wide atmospheric establishing → tighter tension → a final unanswered-question beat), or they'll feel random.
-- **Count is AI-suggested but capped low (1–3)** — the whole intro is only ~5–15s, so more shots = faster cuts in the same window, not a longer intro.
-- **One teaser line for the whole montage** — a single dramatic sentence (not from the story's narration) voiced across the intro to bait curiosity. One line, not one per shot.
+**Key points:**
+- **Cut from the FINISHED story** — the full narration is fed in; hooks mine it for its most gripping moments (reveals, threats, betrayals, turning points), not vague atmosphere.
+- **6–10 charged moments**, ordered as an **escalating montage** that tightens shot to shot and ends on the sharpest unanswered question.
+- **Spoiler control:** tease, never resolve; never reveal the ending. Curiosity, not payoff.
+- **Each shot carries a VOICEOVER line** — one line per shot. **Strongly prefer a real line lifted from the story** (verbatim, or lightly trimmed); fuller lines welcome; write a **fresh** line only when nothing in the story is punchy enough. Each line is tagged `voiceoverSource: "story" | "fresh"`.
 - **Motion prompts**, not stills — each shot specifies camera movement (for the later image-to-video step).
 - **Style Block B** (warmer, dramatic intro look), not Style Block A.
-- **Leans atmospheric** (no characters) to build mystery; a character may appear if it strengthens the hook, using verbatim identity injection like scenes.
+- Characters may appear when a moment calls for them, using verbatim identity injection like scenes.
 
 ## New shared block — `blocks.ts`
 
@@ -31,34 +32,54 @@ depth of field, emotional storytelling, volumetric light, richly colored.
 ```ts
 export const hooksPrompt = {
   system: `${BASE_RULES}
-You are designing the COLD OPEN for a faceless story video — the 5–15 second intro montage that
-plays BEFORE the story's narration begins. Generate it as ONE coherent sequence, not isolated shots.
+You are cutting the TRAILER for a finished faceless story video — the cold-open montage that plays
+BEFORE the narration begins, engineered to stop the scroll. You have the FULL finished story below;
+mine it for its most charged MOMENTS and tease them like a movie trailer.
 
-Decide how many shots the intro needs (1–3) and design them to FLOW as an escalating montage —
-e.g. a wide atmospheric establishing shot → a tighter tension shot → a final beat that poses an
-unanswered question. The shots must connect into one designed sequence, never random.
+Pull 6-10 of the story's most gripping moments — reveals, threats, betrayals, turning points, the
+lines that make a viewer NEED to know what happens next. Order them as an ESCALATING montage that
+tightens shot to shot and ends on the sharpest unanswered question.
 
-Lean atmospheric (no characters) to build mystery; a character may appear only if it strengthens
-the hook. These are MOTION shots: for each, give the camera movement (slow push-in, drift, parallax…).
+SPOILER CONTROL: tease, never resolve. Convey the charge of a moment without giving away how it turns
+out, and NEVER reveal the ending. Curiosity, not payoff.
 
-Also write ONE teaser line — a single dramatic sentence (NOT from the story's narration) voiced
-across the whole intro, baiting curiosity without spoiling. One line for the whole montage.
+These are MOTION shots (for the later image-to-video step): for each, give the camera movement
+(slow push-in, drift, whip-pan, parallax…). Lean cinematic, high-contrast, dramatic.
+
+Each shot carries a VOICEOVER line — the words spoken over that beat. STRONGLY PREFER a real line
+lifted from the story itself (verbatim, or lightly trimmed for length); fuller, meatier lines are
+welcome when they hit harder. Only write a FRESH line when nothing in the story is punchy enough for
+that beat. Mark each line's source: "story" if taken or adapted from the narration, "fresh" if newly
+written. Never resolve the ending in a voiceover.
 
 ${WHISK_RULES}
-Do NOT write characters' physical appearance — injected separately. Give only: the shot, its motion,
-who is present (if any), and any present character's outfit.
+Do NOT write characters' physical appearance — injected separately. For each shot give only: the
+moment it teases, the shot, its motion, the voiceover (+ its source), who is present (if any), and
+any present character's outfit.
 
 Return ONLY this JSON:
 {
-  "suggestedHookCount": 2,
-  "teaserLine": "",
+  "suggestedHookCount": 8,
   "hooks": [
-    { "index": 1, "shot": "subject / setting / action", "motion": "camera movement",
-      "present": ["Name", ...], "outfits": [ { "name": "Name", "outfit": "" } ] }
+    {
+      "index": 1,
+      "moment": "the charged story beat this shot teases",
+      "shot": "subject / setting / action",
+      "motion": "camera movement",
+      "voiceover": "the line spoken over this shot",
+      "voiceoverSource": "story | fresh",
+      "present": ["Name", ...],
+      "outfits": [ { "name": "Name", "outfit": "" } ]
+    }
   ]
 }`,
-  buildUser: (i: { storyBrief: object; logline: string; cast: {name:string;role:string}[] }) =>
-    `STORY CONTEXT:\n${JSON.stringify(i.storyBrief)}\nLOGLINE: ${i.logline}\nCAST: ${JSON.stringify(i.cast)}`,
+  buildUser: (i: {
+    storyBrief: object; logline: string; cast: {name:string;role:string}[]; storyText: string;
+  }) => `STORY CONTEXT:\n${JSON.stringify(i.storyBrief)}
+LOGLINE: ${i.logline}
+CAST: ${JSON.stringify(i.cast)}
+
+FULL STORY:\n${i.storyText}`,
 };
 ```
 
@@ -68,14 +89,16 @@ hook.imagePrompt =
   `${hook.shot}.` +
   presentBlock(hook, characters) +          // verbatim identity + outfit, no names (empty if atmospheric)
   `\n\n${STYLE_BLOCK_B}`;
-// hook.motion stays separate — it feeds the image-to-video step, not the still prompt.
+// hook.motion, hook.voiceover, hook.voiceoverSource and hook.moment are persisted alongside
+// imagePrompt. motion + voiceover feed the later video / VO steps, not the still prompt.
 ```
 
 ## Locked decisions
-1. Teaser line: **yes** — one line per intro, voiced across the montage. ✅
-2. Count: AI-suggested, **capped 1–3**. ✅
-3. Multiple hooks: **sequenced, coherent montage** (single call), not isolated shots. ✅
-4. Look: **Style Block B**, atmospheric-leaning. ✅
+1. Trailer model: hooks are cut from the **finished story**, teasing its **charged moments**. ✅
+2. Voiceover per shot: one line each, **preferring real story lines** (tagged story/fresh). ✅
+3. Count: AI-suggested, **6–10 moments**, escalating montage (single call). ✅
+4. Spoiler control: **tease, never resolve**; never reveal the ending. ✅
+5. Look: **Style Block B**. ✅
 
 ---
 

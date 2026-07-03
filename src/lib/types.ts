@@ -124,11 +124,19 @@ export interface Scene {
   imagePrompt: string;
 }
 
-/** An opening "hook" rendered as an attention-grabbing intro motion scene. */
+/** A trailer beat for the cold open — a charged story moment with a voiceover line. */
 export interface HookScene {
   index: number;
-  /** Motion/image-generation prompt for the opening shot. */
+  /** The charged story beat this shot teases. */
+  moment: string;
+  /** The voiceover line spoken over this shot. */
+  voiceover: string;
+  /** Whether the voiceover was lifted/adapted from the story or freshly written. */
+  voiceoverSource: "story" | "fresh";
+  /** Assembled Whisk-ready image prompt for the shot (Style Block B). */
   imagePrompt: string;
+  /** Camera movement for the image-to-video step (kept separate from the still). */
+  motion?: string;
 }
 
 /** Stage 5 deliverable. `scenes` is reserved for the future scene-splitter pass. */
@@ -140,10 +148,8 @@ export interface Generation {
   segments: StorySegment[];
   /** Reusable character references for the image pipeline. */
   characters: Character[];
-  /** Intro motion scenes — attention-grabbing opening shots. */
+  /** Trailer beats for the cold open — charged story moments with voiceover. */
   hooks: HookScene[];
-  /** Single dramatic teaser line voiced across the cold-open montage. */
-  teaserLine?: string;
   /** The AI's recommendation for how many intro motion scenes suit this story. */
   suggestedHookCount: number;
   /** Click-optimised prompt for the video thumbnail image. */

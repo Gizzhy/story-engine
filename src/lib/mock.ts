@@ -141,28 +141,51 @@ export const mockGeneration: Generation = {
   hooks: [
     {
       index: 1,
+      moment: "The one rule Daniel is handed about Room 9.",
+      voiceover: "Room 9 is occupied. It is paid. You do not knock.",
+      voiceoverSource: "story",
       imagePrompt:
         "Slow push-in down a long, dim ninth-floor hotel corridor toward a single closed door with a brass '9', a thin blade of warm golden light leaking from beneath it and pulsing almost imperceptibly; low fog drifts across patterned carpet. Handheld micro-shake, deep teal shadows against amber glow, volumetric light, ominous hush, photoreal cinematic, shallow depth of field, 35mm grain.",
+      motion: "Slow push-in with a faint handheld micro-shake.",
     },
     {
       index: 2,
+      moment: "A checkout appears in Daniel's own handwriting.",
+      voiceover:
+        "A checkout I had not performed — in handwriting that was unmistakably my own.",
+      voiceoverSource: "story",
       imagePrompt:
         "Slow overhead crane descent onto an open leather occupancy ledger under a desk lamp, the camera settling as a single line of handwriting finishes itself with no hand present, ink glistening wet; a clock in soft focus ticks toward 3:14. Subtle dolly, warm lamplight pooled in cold blue dark, eerie stillness broken by motion, photoreal, shallow focus, film grain.",
+      motion: "Overhead crane descent settling to a stop.",
     },
     {
       index: 3,
+      moment: "Arrival at the fog-bound Glasswater, one light already on.",
+      voiceover:
+        "The hotel hires its night people the way it does everything now — quietly.",
+      voiceoverSource: "story",
       imagePrompt:
         "A lone bus carves up a fog-swallowed mountain road at dusk toward a vast faded alpine hotel, the camera tracking alongside then craning up to the hotel's many dark windows — all black except one, where a warm light clicks on. Sweeping aerial-to-tracking move, muted teal-and-amber palette, melancholy grandeur, cinematic wide, atmospheric haze, photoreal.",
+      motion: "Tracking alongside, then craning up the facade.",
     },
     {
       index: 4,
+      moment: "The auditor before him asked one question too many.",
+      voiceover:
+        "The last auditor asked the same questions. Then he checked in — and never checked out.",
+      voiceoverSource: "story",
       imagePrompt:
         "Push past a weary night auditor at a brass front desk as he looks up, the camera drifting toward the elevator's brass arrow climbing on its own to the 9th floor while no one waits; lobby chandeliers flicker half-lit. Smooth gliding dolly, warm desk light against deep shadow, creeping dread, photoreal cinematic, shallow depth of field, subtle grain.",
+      motion: "Gliding dolly past the desk toward the elevator.",
     },
     {
       index: 5,
+      moment: "Every alias hides the same initial — his own.",
+      voiceover: "Every name they used was a word for what fire leaves behind.",
+      voiceoverSource: "story",
       imagePrompt:
         "Slow rack-focus across a basement wall of yellowed registration cards as the camera glides past decades of signatures, pulling focus to a repeated underlined initial 'A', dust motes swirling in a single hanging bulb's light. Lateral tracking move, cold damp blue-grey tones cut by one warm bulb, unsettling reveal, film-noir mood, photoreal, fine grain.",
+      motion: "Lateral tracking move with a pull to sharp focus.",
     },
   ],
   suggestedHookCount: 4,

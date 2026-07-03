@@ -951,7 +951,11 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
       const data = snap.data() as {
         blueprint?: Blueprint;
         styleMood?: string;
-        generation?: { characters?: VisualCharacter[]; hooks?: unknown[] };
+        generation?: {
+          characters?: VisualCharacter[];
+          hooks?: unknown[];
+          segments?: { index: number; text: string }[];
+        };
       };
 
       const blueprint = data.blueprint;
@@ -963,6 +967,12 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
       const alreadyDone = Array.isArray(existing) && existing.length > 0;
 
       if (!alreadyDone) {
+        // The trailer is cut from the FINISHED story — feed the full narration.
+        const storyText = [...(data.generation?.segments ?? [])]
+          .sort((a, b) => a.index - b.index)
+          .map((s) => s.text)
+          .join("\n\n");
+
         const anthropic = new Anthropic({ apiKey: anthropicKey.value() });
 
         const parsed = await generateJson<Hooks>(
@@ -974,21 +984,24 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
             storyBrief: blueprint.storyBrief,
             logline: blueprint.logline,
             cast: characters.map((c) => ({ name: c.name, role: c.role })),
+            storyText,
           }),
           HooksSchema,
         );
 
         const hooks = parsed.hooks.map((h) => ({
           index: h.index,
+          moment: h.moment,
           imagePrompt: assemble.hookPrompt(h, characters, styleMood),
           // Motion stays separate — it feeds the image-to-video step.
           motion: h.motion,
+          voiceover: h.voiceover,
+          voiceoverSource: h.voiceoverSource,
         }));
 
         await jobRef.update({
           "generation.hooks": hooks,
           "generation.suggestedHookCount": parsed.suggestedHookCount,
-          "generation.teaserLine": parsed.teaserLine,
           visualStatus: "thumbnail",
           updatedAt: FieldValue.serverTimestamp(),
         });

@@ -1,36 +1,57 @@
-// Phase 3 — Hooks (cold open). One coherent 5–15s intro montage as motion
-// shots, plus a single teaser line. Character descriptions injected separately.
+// Phase 3 — Hooks (TRAILER model). Reads the FINISHED story and cuts a cold-open
+// montage that teases the most charged moments; each shot carries a voiceover
+// line (preferring real story lines). Character descriptions injected separately.
 // Verbatim per docs/hooks-thumbnail-metadata-rules.md.
 import { BASE_RULES, WHISK_RULES } from "./blocks";
 
 export const hooksPrompt = {
   system: `${BASE_RULES}
-You are designing the COLD OPEN for a faceless story video — the 5–15 second intro montage that
-plays BEFORE the story's narration begins. Generate it as ONE coherent sequence, not isolated shots.
+You are cutting the TRAILER for a finished faceless story video — the cold-open montage that plays
+BEFORE the narration begins, engineered to stop the scroll. You have the FULL finished story below;
+mine it for its most charged MOMENTS and tease them like a movie trailer.
 
-Decide how many shots the intro needs (1–3) and design them to FLOW as an escalating montage —
-e.g. a wide atmospheric establishing shot → a tighter tension shot → a final beat that poses an
-unanswered question. The shots must connect into one designed sequence, never random.
+Pull 6-10 of the story's most gripping moments — reveals, threats, betrayals, turning points, the
+lines that make a viewer NEED to know what happens next. Order them as an ESCALATING montage that
+tightens shot to shot and ends on the sharpest unanswered question.
 
-Lean atmospheric (no characters) to build mystery; a character may appear only if it strengthens
-the hook. These are MOTION shots: for each, give the camera movement (slow push-in, drift, parallax…).
+SPOILER CONTROL: tease, never resolve. Convey the charge of a moment without giving away how it turns
+out, and NEVER reveal the ending. Curiosity, not payoff.
 
-Also write ONE teaser line — a single dramatic sentence (NOT from the story's narration) voiced
-across the whole intro, baiting curiosity without spoiling. One line for the whole montage.
+These are MOTION shots (for the later image-to-video step): for each, give the camera movement
+(slow push-in, drift, whip-pan, parallax…). Lean cinematic, high-contrast, dramatic.
+
+Each shot carries a VOICEOVER line — the words spoken over that beat. STRONGLY PREFER a real line
+lifted from the story itself (verbatim, or lightly trimmed for length); fuller, meatier lines are
+welcome when they hit harder. Only write a FRESH line when nothing in the story is punchy enough for
+that beat. Mark each line's source: "story" if taken or adapted from the narration, "fresh" if newly
+written. Never resolve the ending in a voiceover.
 
 ${WHISK_RULES}
-Do NOT write characters' physical appearance — injected separately. Give only: the shot, its motion,
-who is present (if any), and any present character's outfit.
+Do NOT write characters' physical appearance — injected separately. For each shot give only: the
+moment it teases, the shot, its motion, the voiceover (+ its source), who is present (if any), and
+any present character's outfit.
 
 Return ONLY this JSON:
 {
-  "suggestedHookCount": 2,
-  "teaserLine": "",
+  "suggestedHookCount": 8,
   "hooks": [
-    { "index": 1, "shot": "subject / setting / action", "motion": "camera movement",
-      "present": ["Name", ...], "outfits": [ { "name": "Name", "outfit": "" } ] }
+    {
+      "index": 1,
+      "moment": "the charged story beat this shot teases",
+      "shot": "subject / setting / action",
+      "motion": "camera movement",
+      "voiceover": "the line spoken over this shot",
+      "voiceoverSource": "story | fresh",
+      "present": ["Name", ...],
+      "outfits": [ { "name": "Name", "outfit": "" } ]
+    }
   ]
 }`,
-  buildUser: (i: { storyBrief: object; logline: string; cast: {name:string;role:string}[] }) =>
-    `STORY CONTEXT:\n${JSON.stringify(i.storyBrief)}\nLOGLINE: ${i.logline}\nCAST: ${JSON.stringify(i.cast)}`,
+  buildUser: (i: {
+    storyBrief: object; logline: string; cast: {name:string;role:string}[]; storyText: string;
+  }) => `STORY CONTEXT:\n${JSON.stringify(i.storyBrief)}
+LOGLINE: ${i.logline}
+CAST: ${JSON.stringify(i.cast)}
+
+FULL STORY:\n${i.storyText}`,
 };
