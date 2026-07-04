@@ -105,15 +105,14 @@ export const ScenesSchema = z.object({
 
 // Phase 3 — Hooks (cold open).
 export const HooksSchema = z.object({
-  suggestedHookCount: z.number(),
-  hooks: z.array(
+  monologue: z.string(),
+  suggestedShotCount: z.number(),
+  shots: z.array(
     z.object({
       index: z.number(),
-      moment: z.string(),
+      anchor: z.string(),
       shot: z.string(),
       motion: z.string(),
-      voiceover: z.string(),
-      voiceoverSource: z.enum(["story", "fresh"]),
       present: z.array(z.string()),
       outfits: z.array(OutfitSchema),
     }),

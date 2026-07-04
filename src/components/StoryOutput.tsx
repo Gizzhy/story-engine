@@ -109,13 +109,12 @@ export default function StoryOutput({
   const segments = [...generation.segments].sort((a, b) => a.index - b.index);
   const characters = generation.characters ?? [];
   const scenes = generation.scenes ?? [];
-  const hooks = generation.hooks ?? [];
+  const monologue = generation.hooks?.monologue;
+  const shots = generation.hooks?.shots ?? [];
   const tags = generation.tags ?? [];
   const hashtags = generation.hashtags ?? [];
   const description = generation.description;
   const thumbnail = generation.thumbnailPrompt;
-  const suggestedHookCount = generation.suggestedHookCount || hooks.length;
-  const visibleHooks = hooks.slice(0, suggestedHookCount);
 
   const uniqueScenes = [
     ...new Map(scenes.map((s) => [s.index, s])).values(),
@@ -194,7 +193,7 @@ export default function StoryOutput({
     { key: "script", label: "Script" },
     { key: "characters", label: "Characters", count: characters.length || undefined },
     { key: "scenes", label: "Scenes", count: uniqueScenes.length || undefined },
-    { key: "hooks", label: "Hooks", count: visibleHooks.length || undefined },
+    { key: "hooks", label: "Hooks", count: shots.length || undefined },
     { key: "thumbnail", label: "Thumbnail" },
     { key: "metadata", label: "Metadata" },
   ];
@@ -474,73 +473,81 @@ export default function StoryOutput({
         {/* ── Hooks (trailer) ────────────────────────────────────── */}
         {tab === "hooks" &&
           visualTab(
-            "the trailer / cold open",
-            visibleHooks.length > 0 ? (
-              <div>
-                <div className="flex items-center justify-end">
-                  <GhostButton
-                    onClick={() =>
-                      copy(
-                        "hooks",
-                        visibleHooks
-                          .map((h, i) => `Hook ${i + 1}: ${h.imagePrompt}`)
-                          .join("\n\n"),
-                      )
-                    }
-                  >
-                    {label("hooks", "Copy all")}
-                  </GhostButton>
-                </div>
-                <div className="mt-3 flex flex-col gap-3">
-                  {visibleHooks.map((h, i) => (
-                    <div
-                      key={h.index}
-                      className="rounded-md border border-line bg-surface/60 px-4 py-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[0.6rem] uppercase tracking-[0.18em] text-petrol">
-                          Hook {i + 1}
-                        </span>
-                        <GhostButton onClick={() => copy(`hook-${i}`, h.imagePrompt)}>
-                          {label(`hook-${i}`, "Copy")}
+            "the cold open",
+            monologue || shots.length > 0 ? (
+              <div className="flex flex-col gap-7">
+                {monologue && (
+                  <div>
+                    <SectionHead
+                      title="Cold-open monologue"
+                      action={
+                        <GhostButton onClick={() => copy("monologue", monologue)}>
+                          {label("monologue", "Copy")}
                         </GhostButton>
-                      </div>
-
-                      <div className="mt-2 flex items-start justify-between gap-3">
-                        <p className="font-reading text-base leading-relaxed text-ink">
-                          “{h.voiceover}”
-                        </p>
-                        <span
-                          className={`mt-1 shrink-0 rounded-full px-2 py-0.5 font-mono text-[0.55rem] uppercase tracking-[0.15em] ${
-                            h.voiceoverSource === "story"
-                              ? "bg-petrol/10 text-petrol"
-                              : "border border-line text-faint"
-                          }`}
+                      }
+                    />
+                    <p className="mt-3 font-reading text-lg leading-relaxed text-ink">
+                      {monologue}
+                    </p>
+                  </div>
+                )}
+                {shots.length > 0 && (
+                  <div>
+                    <SectionHead
+                      title={`Backdrop shots · ${shots.length}`}
+                      action={
+                        <GhostButton
+                          onClick={() =>
+                            copy(
+                              "hooks",
+                              shots
+                                .map((s, i) => `Shot ${i + 1}: ${s.imagePrompt}`)
+                                .join("\n\n"),
+                            )
+                          }
                         >
-                          {h.voiceoverSource}
-                        </span>
-                      </div>
+                          {label("hooks", "Copy all")}
+                        </GhostButton>
+                      }
+                    />
+                    <div className="mt-3 flex flex-col gap-3">
+                      {shots.map((s, i) => (
+                        <div
+                          key={s.index}
+                          className="rounded-md border border-line bg-surface/60 px-4 py-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[0.6rem] uppercase tracking-[0.18em] text-petrol">
+                              Shot {i + 1}
+                            </span>
+                            <GhostButton onClick={() => copy(`shot-${i}`, s.imagePrompt)}>
+                              {label(`shot-${i}`, "Copy")}
+                            </GhostButton>
+                          </div>
 
-                      {h.moment && (
-                        <p className="mt-1 text-xs italic leading-relaxed text-faint">
-                          {h.moment}
-                        </p>
-                      )}
+                          {/* Anchor — where this shot sits under the monologue */}
+                          {s.anchor && (
+                            <p className="mt-1.5 text-xs leading-relaxed text-faint">
+                              <span className="text-petrol">Under:</span> “{s.anchor}”
+                            </p>
+                          )}
 
-                      <p className="mt-2.5 font-mono text-xs leading-relaxed text-muted">
-                        {h.imagePrompt}
-                      </p>
-                      {h.motion && (
-                        <div className="mt-1 font-mono text-xs text-faint">
-                          Motion: {h.motion}
+                          <p className="mt-2 font-mono text-xs leading-relaxed text-muted">
+                            {s.imagePrompt}
+                          </p>
+                          {s.motion && (
+                            <div className="mt-1 font-mono text-xs text-faint">
+                              Motion: {s.motion}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
-            ) : loading("hooks", visibleHooks.length > 0) ? (
-              <LoadingNote>Cutting the trailer…</LoadingNote>
+            ) : loading("hooks", shots.length > 0) ? (
+              <LoadingNote>Writing the cold open…</LoadingNote>
             ) : null,
           )}
 

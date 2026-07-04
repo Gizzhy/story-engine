@@ -953,7 +953,7 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
         styleMood?: string;
         generation?: {
           characters?: VisualCharacter[];
-          hooks?: unknown[];
+          hooks?: { shots?: unknown[] };
           segments?: { index: number; text: string }[];
         };
       };
@@ -964,10 +964,10 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
       const styleMood = data.styleMood ?? "";
 
       const existing = data.generation?.hooks;
-      const alreadyDone = Array.isArray(existing) && existing.length > 0;
+      const alreadyDone = Array.isArray(existing?.shots) && existing.shots.length > 0;
 
       if (!alreadyDone) {
-        // The trailer is cut from the FINISHED story — feed the full narration.
+        // The cold open is written from the FINISHED story — feed the narration.
         const storyText = [...(data.generation?.segments ?? [])]
           .sort((a, b) => a.index - b.index)
           .map((s) => s.text)
@@ -989,19 +989,23 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
           HooksSchema,
         );
 
-        const hooks = parsed.hooks.map((h) => ({
-          index: h.index,
-          moment: h.moment,
-          imagePrompt: assemble.hookPrompt(h, characters, styleMood),
+        const shots = parsed.shots.map((s) => ({
+          index: s.index,
+          anchor: s.anchor,
+          shot: s.shot,
+          imagePrompt: assemble.hookPrompt(s, characters, styleMood),
           // Motion stays separate — it feeds the image-to-video step.
-          motion: h.motion,
-          voiceover: h.voiceover,
-          voiceoverSource: h.voiceoverSource,
+          motion: s.motion,
+          present: s.present,
+          outfits: s.outfits,
         }));
 
         await jobRef.update({
-          "generation.hooks": hooks,
-          "generation.suggestedHookCount": parsed.suggestedHookCount,
+          "generation.hooks": {
+            monologue: parsed.monologue,
+            suggestedShotCount: parsed.suggestedShotCount,
+            shots,
+          },
           visualStatus: "thumbnail",
           updatedAt: FieldValue.serverTimestamp(),
         });

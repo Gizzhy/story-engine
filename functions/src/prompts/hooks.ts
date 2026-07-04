@@ -1,47 +1,43 @@
-// Phase 3 — Hooks (TRAILER model). Reads the FINISHED story and cuts a cold-open
-// montage that teases the most charged moments; each shot carries a voiceover
-// line (preferring real story lines). Character descriptions injected separately.
+// Phase 3 — Hooks (B2 model). Reads the FINISHED story and writes ONE flowing
+// cold-open monologue plus backdrop shots, each anchored to an exact phrase of
+// the monologue. Character descriptions injected separately.
 // Verbatim per docs/hooks-thumbnail-metadata-rules.md.
 import { BASE_RULES, WHISK_RULES } from "./blocks";
 
 export const hooksPrompt = {
   system: `${BASE_RULES}
-You are cutting the TRAILER for a finished faceless story video — the cold-open montage that plays
-BEFORE the narration begins, engineered to stop the scroll. You have the FULL finished story below;
-mine it for its most charged MOMENTS and tease them like a movie trailer.
+You are writing the COLD OPEN for a finished faceless story video — the montage that plays BEFORE the
+narration begins, engineered to stop the scroll. You have the FULL finished story below. Produce TWO
+things: (1) ONE continuous cold-open MONOLOGUE, and (2) the backdrop SHOTS that play under it.
 
-Pull 6-10 of the story's most gripping moments — reveals, threats, betrayals, turning points, the
-lines that make a viewer NEED to know what happens next. Order them as an ESCALATING montage that
-tightens shot to shot and ends on the sharpest unanswered question.
+THE MONOLOGUE — a single, flowing voiceover of roughly 40-80 words, spoken across the whole cold open:
+- OPEN on the most arresting line you can find, then build tension line to line to a final hook.
+- Weave it from the STORY'S OWN LINES (verbatim or lightly trimmed); add only minimal FRESH connective
+  phrasing so it flows as one piece. It should sound like the story speaking, not a summary.
+- SPOILER-SAFE: tease, never resolve; NEVER reveal the ending.
+- One continuous piece of writing — NOT a list, NOT one line per shot.
 
-SPOILER CONTROL: tease, never resolve. Convey the charge of a moment without giving away how it turns
-out, and NEVER reveal the ending. Curiosity, not payoff.
-
-These are MOTION shots (for the later image-to-video step): for each, give the camera movement
-(slow push-in, drift, whip-pan, parallax…). Lean cinematic, high-contrast, dramatic.
-
-Each shot carries a VOICEOVER line — the words spoken over that beat. STRONGLY PREFER a real line
-lifted from the story itself (verbatim, or lightly trimmed for length); fuller, meatier lines are
-welcome when they hit harder. Only write a FRESH line when nothing in the story is punchy enough for
-that beat. Mark each line's source: "story" if taken or adapted from the narration, "fresh" if newly
-written. Never resolve the ending in a voiceover.
+THE SHOTS — 6-10 backdrop images that play under the monologue as it is spoken:
+- Each shot ANCHORS to an exact phrase FROM THE MONOLOGUE: copy that phrase verbatim into "anchor" so
+  we know which words it plays under. Cover the monologue in order, start to finish.
+- These are MOTION shots (for the later image-to-video step): give each a camera movement
+  (slow push-in, drift, whip-pan, parallax…). Lean cinematic, high-contrast, dramatic.
+- Lean atmospheric; a character may appear only when the moment genuinely calls for it.
 
 ${WHISK_RULES}
 Do NOT write characters' physical appearance — injected separately. For each shot give only: the
-moment it teases, the shot, its motion, the voiceover (+ its source), who is present (if any), and
-any present character's outfit.
+anchor phrase, the shot, its motion, who is present (if any), and any present character's outfit.
 
 Return ONLY this JSON:
 {
-  "suggestedHookCount": 8,
-  "hooks": [
+  "monologue": "the full continuous cold-open voiceover",
+  "suggestedShotCount": 8,
+  "shots": [
     {
       "index": 1,
-      "moment": "the charged story beat this shot teases",
+      "anchor": "the exact phrase from the monologue this shot plays under",
       "shot": "subject / setting / action",
       "motion": "camera movement",
-      "voiceover": "the line spoken over this shot",
-      "voiceoverSource": "story | fresh",
       "present": ["Name", ...],
       "outfits": [ { "name": "Name", "outfit": "" } ]
     }

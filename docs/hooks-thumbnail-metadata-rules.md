@@ -4,18 +4,16 @@ The three closing sections. All reuse patterns already built; the only new share
 
 ---
 
-# Phase 3 — Hooks (Intro / Cold Open) — TRAILER model
+# Phase 3 — Hooks (Intro / Cold Open) — B2 model
 
-The **cold open**: a montage that plays **before** the story's narration begins, to stop the scroll. It stands outside the script. Unlike the old atmospheric intro, hooks now read the **finished story** and cut a **trailer** — teasing the most charged moments, each carrying a voiceover line.
+The **cold open**: a montage that plays **before** the story's narration begins, to stop the scroll. It stands outside the script. The B2 model reads the **finished story** and produces **ONE flowing cold-open monologue** plus **backdrop shots anchored to it** — not a per-line trailer.
 
 **Key points:**
-- **Cut from the FINISHED story** — the full narration is fed in; hooks mine it for its most gripping moments (reveals, threats, betrayals, turning points), not vague atmosphere.
-- **6–10 charged moments**, ordered as an **escalating montage** that tightens shot to shot and ends on the sharpest unanswered question.
-- **Spoiler control:** tease, never resolve; never reveal the ending. Curiosity, not payoff.
-- **Each shot carries a VOICEOVER line** — one line per shot. **Strongly prefer a real line lifted from the story** (verbatim, or lightly trimmed); fuller lines welcome; write a **fresh** line only when nothing in the story is punchy enough. Each line is tagged `voiceoverSource: "story" | "fresh"`.
+- **Two outputs.** (1) A single continuous **monologue** (the cold-open VO script), and (2) **6–10 backdrop shots** that play under it.
+- **The monologue** is ~40–80 words: opens on its most arresting line, builds to a final hook, is **woven from the story's own lines** (verbatim / lightly trimmed) with only minimal fresh connective phrasing, and is **spoiler-safe** (never reveals the ending). One continuous piece — not a list, not one line per shot.
+- **Each shot anchors to an exact phrase from the monologue** (`anchor`), so we know which words it plays under. Shots cover the monologue in order.
 - **Motion prompts**, not stills — each shot specifies camera movement (for the later image-to-video step).
-- **Style Block B** (warmer, dramatic intro look), not Style Block A.
-- Characters may appear when a moment calls for them, using verbatim identity injection like scenes.
+- **Style Block B** (warmer, dramatic intro look), not Style Block A. Lean atmospheric; a character appears only when the moment calls for it.
 
 ## New shared block — `blocks.ts`
 
@@ -32,42 +30,38 @@ depth of field, emotional storytelling, volumetric light, richly colored.
 ```ts
 export const hooksPrompt = {
   system: `${BASE_RULES}
-You are cutting the TRAILER for a finished faceless story video — the cold-open montage that plays
-BEFORE the narration begins, engineered to stop the scroll. You have the FULL finished story below;
-mine it for its most charged MOMENTS and tease them like a movie trailer.
+You are writing the COLD OPEN for a finished faceless story video — the montage that plays BEFORE the
+narration begins, engineered to stop the scroll. You have the FULL finished story below. Produce TWO
+things: (1) ONE continuous cold-open MONOLOGUE, and (2) the backdrop SHOTS that play under it.
 
-Pull 6-10 of the story's most gripping moments — reveals, threats, betrayals, turning points, the
-lines that make a viewer NEED to know what happens next. Order them as an ESCALATING montage that
-tightens shot to shot and ends on the sharpest unanswered question.
+THE MONOLOGUE — a single, flowing voiceover of roughly 40-80 words, spoken across the whole cold open:
+- OPEN on the most arresting line you can find, then build tension line to line to a final hook.
+- Weave it from the STORY'S OWN LINES (verbatim or lightly trimmed); add only minimal FRESH connective
+  phrasing so it flows as one piece. It should sound like the story speaking, not a summary.
+- SPOILER-SAFE: tease, never resolve; NEVER reveal the ending.
+- One continuous piece of writing — NOT a list, NOT one line per shot.
 
-SPOILER CONTROL: tease, never resolve. Convey the charge of a moment without giving away how it turns
-out, and NEVER reveal the ending. Curiosity, not payoff.
-
-These are MOTION shots (for the later image-to-video step): for each, give the camera movement
-(slow push-in, drift, whip-pan, parallax…). Lean cinematic, high-contrast, dramatic.
-
-Each shot carries a VOICEOVER line — the words spoken over that beat. STRONGLY PREFER a real line
-lifted from the story itself (verbatim, or lightly trimmed for length); fuller, meatier lines are
-welcome when they hit harder. Only write a FRESH line when nothing in the story is punchy enough for
-that beat. Mark each line's source: "story" if taken or adapted from the narration, "fresh" if newly
-written. Never resolve the ending in a voiceover.
+THE SHOTS — 6-10 backdrop images that play under the monologue as it is spoken:
+- Each shot ANCHORS to an exact phrase FROM THE MONOLOGUE: copy that phrase verbatim into "anchor" so
+  we know which words it plays under. Cover the monologue in order, start to finish.
+- These are MOTION shots (for the later image-to-video step): give each a camera movement
+  (slow push-in, drift, whip-pan, parallax…). Lean cinematic, high-contrast, dramatic.
+- Lean atmospheric; a character may appear only when the moment genuinely calls for it.
 
 ${WHISK_RULES}
 Do NOT write characters' physical appearance — injected separately. For each shot give only: the
-moment it teases, the shot, its motion, the voiceover (+ its source), who is present (if any), and
-any present character's outfit.
+anchor phrase, the shot, its motion, who is present (if any), and any present character's outfit.
 
 Return ONLY this JSON:
 {
-  "suggestedHookCount": 8,
-  "hooks": [
+  "monologue": "the full continuous cold-open voiceover",
+  "suggestedShotCount": 8,
+  "shots": [
     {
       "index": 1,
-      "moment": "the charged story beat this shot teases",
+      "anchor": "the exact phrase from the monologue this shot plays under",
       "shot": "subject / setting / action",
       "motion": "camera movement",
-      "voiceover": "the line spoken over this shot",
-      "voiceoverSource": "story | fresh",
       "present": ["Name", ...],
       "outfits": [ { "name": "Name", "outfit": "" } ]
     }
@@ -85,20 +79,19 @@ FULL STORY:\n${i.storyText}`,
 
 ## Assembly (code)
 ```ts
-hook.imagePrompt =
-  `${hook.shot}.` +
-  presentBlock(hook, characters) +          // verbatim identity + outfit, no names (empty if atmospheric)
+shot.imagePrompt =
+  `${shot.shot}.` +
+  presentBlock(shot, characters) +          // verbatim identity + outfit, no names (empty if atmospheric)
   `\n\n${STYLE_BLOCK_B}`;
-// hook.motion, hook.voiceover, hook.voiceoverSource and hook.moment are persisted alongside
-// imagePrompt. motion + voiceover feed the later video / VO steps, not the still prompt.
+// Persisted: generation.hooks = { monologue, suggestedShotCount, shots:[{ index, anchor, shot,
+// motion, imagePrompt, present, outfits }] }. shot.motion feeds the later image-to-video step.
 ```
 
 ## Locked decisions
-1. Trailer model: hooks are cut from the **finished story**, teasing its **charged moments**. ✅
-2. Voiceover per shot: one line each, **preferring real story lines** (tagged story/fresh). ✅
-3. Count: AI-suggested, **6–10 moments**, escalating montage (single call). ✅
-4. Spoiler control: **tease, never resolve**; never reveal the ending. ✅
-5. Look: **Style Block B**. ✅
+1. B2 model: ONE flowing cold-open **monologue** + **anchored backdrop shots** (replaces the per-line trailer). ✅
+2. Monologue: ~40–80 words, woven from the story's own lines, spoiler-safe, opens on its strongest line. ✅
+3. Shots: **6–10**, each anchored to an exact monologue phrase, covering it in order. ✅
+4. Motion prompts per shot; **Style Block B**; atmospheric-leaning. ✅
 
 ---
 

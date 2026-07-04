@@ -124,19 +124,30 @@ export interface Scene {
   imagePrompt: string;
 }
 
-/** A trailer beat for the cold open — a charged story moment with a voiceover line. */
-export interface HookScene {
+/** One backdrop shot of the cold open, anchored to a phrase of the monologue. */
+export interface HookShot {
   index: number;
-  /** The charged story beat this shot teases. */
-  moment: string;
-  /** The voiceover line spoken over this shot. */
-  voiceover: string;
-  /** Whether the voiceover was lifted/adapted from the story or freshly written. */
-  voiceoverSource: "story" | "fresh";
+  /** The exact monologue phrase this shot plays under. */
+  anchor: string;
+  /** The shot's subject / setting / action (pre-assembly). */
+  shot: string;
+  /** Camera movement for the image-to-video step (kept separate from the still). */
+  motion: string;
   /** Assembled Whisk-ready image prompt for the shot (Style Block B). */
   imagePrompt: string;
-  /** Camera movement for the image-to-video step (kept separate from the still). */
-  motion?: string;
+  /** Cast names present in the shot (for keying only). */
+  present: string[];
+  outfits: { name: string; outfit: string }[];
+}
+
+/** The cold open: one flowing monologue + the backdrop shots that play under it. */
+export interface Hooks {
+  /** The continuous cold-open voiceover (the script). */
+  monologue: string;
+  /** The AI's recommended shot count. */
+  suggestedShotCount?: number;
+  /** Backdrop shots, anchored to phrases of the monologue, in order. */
+  shots: HookShot[];
 }
 
 /** Stage 5 deliverable. `scenes` is reserved for the future scene-splitter pass. */
@@ -148,10 +159,8 @@ export interface Generation {
   segments: StorySegment[];
   /** Reusable character references for the image pipeline. */
   characters: Character[];
-  /** Trailer beats for the cold open — charged story moments with voiceover. */
-  hooks: HookScene[];
-  /** The AI's recommendation for how many intro motion scenes suit this story. */
-  suggestedHookCount: number;
+  /** The cold open — a flowing monologue plus anchored backdrop shots. */
+  hooks: Hooks;
   /** Click-optimised prompt for the video thumbnail image. */
   thumbnailPrompt: string;
   /** Scenes split from the narration by the Phase 2 splitter pass. */
