@@ -3,6 +3,7 @@ import { httpsCallable } from "firebase/functions";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db, functions } from "./firebase";
 import type {
+  AudioStatus,
   Blueprint,
   Generation,
   GenerationInput,
@@ -38,12 +39,26 @@ export interface UseGeneration {
   sceneProgress: WriteProgress | null;
   /** Scenes keyed by segment index — used to anchor scenes to their segment. */
   scenesBySegment: Record<string, Scene[]> | null;
+  /** The voice/TTS phase lifecycle, once audio has been kicked off. */
+  audioStatus: AudioStatus | null;
+  /** Per-segment narration audio URLs, keyed by segment index. */
+  audioSegments: Record<string, string> | null;
+  /** The separately-voiced cold-open hook audio URL. */
+  hookAudioUrl: string | null;
+  /** The stitched full-story narration audio URL. */
+  fullAudioUrl: string | null;
+  /** Per-segment synthesis progress for "Segment X of N". */
+  audioProgress: WriteProgress | null;
   /** Begin a run: invoke startJob, then subscribe to the job doc. */
   start: (input: GenerationInput) => Promise<void>;
   /** Approve the blueprint: invoke approveJob; the doc's status drives the UI. */
   approve: (chosenTitle: string) => Promise<void>;
   /** Kick off the visual phase: invoke generateVisuals; the doc drives the UI. */
   generateVisuals: () => Promise<void>;
+  /** Kick off the voice/TTS phase: invoke generateAudio; the doc drives the UI. */
+  generateAudio: () => Promise<void>;
+  /** Resume a quota-paused audio job: invoke resumeAudio; the doc drives the UI. */
+  resumeAudio: () => Promise<void>;
   /** Cancel / regenerate / start over — detaches and returns to idle. */
   reset: () => void;
 }
@@ -88,6 +103,14 @@ export function useGeneration(): UseGeneration {
     string,
     Scene[]
   > | null>(null);
+  const [audioStatus, setAudioStatus] = useState<AudioStatus | null>(null);
+  const [audioSegments, setAudioSegments] = useState<Record<
+    string,
+    string
+  > | null>(null);
+  const [hookAudioUrl, setHookAudioUrl] = useState<string | null>(null);
+  const [fullAudioUrl, setFullAudioUrl] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] = useState<WriteProgress | null>(null);
 
   const unsubscribe = useRef<(() => void) | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -117,8 +140,17 @@ export function useGeneration(): UseGeneration {
           setVisualStatus(data.visualStatus ?? null);
           setSceneProgress(data.sceneProgress ?? null);
           setScenesBySegment(data.scenesBySegment ?? null);
-          // Either the main job or the visual phase can carry an error message.
-          if (data.status === "error" || data.visualStatus === "error") {
+          setAudioStatus(data.audioStatus ?? null);
+          setAudioSegments(data.audioSegments ?? null);
+          setHookAudioUrl(data.hookAudioUrl ?? null);
+          setFullAudioUrl(data.fullAudioUrl ?? null);
+          setAudioProgress(data.audioProgress ?? null);
+          // The main job, the visual phase, or the audio phase can carry an error.
+          if (
+            data.status === "error" ||
+            data.visualStatus === "error" ||
+            data.audioStatus === "error"
+          ) {
             setErrorMessage(data.error ?? "Generation failed.");
           }
         },
@@ -140,6 +172,11 @@ export function useGeneration(): UseGeneration {
     setVisualStatus(null);
     setSceneProgress(null);
     setScenesBySegment(null);
+    setAudioStatus(null);
+    setAudioSegments(null);
+    setHookAudioUrl(null);
+    setFullAudioUrl(null);
+    setAudioProgress(null);
   }, []);
 
   const start = useCallback(
@@ -204,6 +241,42 @@ export function useGeneration(): UseGeneration {
     }
   }, []);
 
+  const generateAudio = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    try {
+      const callable = httpsCallable<{ jobId: string }, { ok: boolean }>(
+        functions,
+        "generateAudio",
+      );
+      // Don't change state locally — the doc's audioStatus drives the UI.
+      await callable({ jobId });
+    } catch (err) {
+      setAudioStatus("error");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to start audio.",
+      );
+    }
+  }, []);
+
+  const resumeAudio = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    try {
+      const callable = httpsCallable<{ jobId: string }, { ok: boolean }>(
+        functions,
+        "resumeAudio",
+      );
+      // Don't change state locally — the doc's audioStatus drives the UI.
+      await callable({ jobId });
+    } catch (err) {
+      setAudioStatus("error");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to resume audio.",
+      );
+    }
+  }, []);
+
   const reset = useCallback(() => {
     detach();
     jobIdRef.current = null;
@@ -233,9 +306,16 @@ export function useGeneration(): UseGeneration {
     visualStatus,
     sceneProgress,
     scenesBySegment,
+    audioStatus,
+    audioSegments,
+    hookAudioUrl,
+    fullAudioUrl,
+    audioProgress,
     start,
     approve,
     generateVisuals,
+    generateAudio,
+    resumeAudio,
     reset,
   };
 }

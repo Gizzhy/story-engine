@@ -1,4 +1,5 @@
 import type {
+  AudioStatus,
   Blueprint,
   Generation,
   JobSegment,
@@ -23,8 +24,15 @@ interface ResultsCanvasProps {
   visualStatus: VisualStatus | null;
   sceneProgress: WriteProgress | null;
   scenesBySegment: Record<string, Scene[]> | null;
+  audioStatus: AudioStatus | null;
+  audioSegments: Record<string, string> | null;
+  hookAudioUrl: string | null;
+  fullAudioUrl: string | null;
+  audioProgress: WriteProgress | null;
   onApprove: (chosenTitle: string) => void;
   onGenerateVisuals: () => void;
+  onGenerateAudio: () => void;
+  onResumeAudio: () => void;
   onReset: () => void;
 }
 
@@ -43,8 +51,15 @@ export default function ResultsCanvas({
   visualStatus,
   sceneProgress,
   scenesBySegment,
+  audioStatus,
+  audioSegments,
+  hookAudioUrl,
+  fullAudioUrl,
+  audioProgress,
   onApprove,
   onGenerateVisuals,
+  onGenerateAudio,
+  onResumeAudio,
   onReset,
 }: ResultsCanvasProps) {
   return (
@@ -75,8 +90,15 @@ export default function ResultsCanvas({
           visualStatus={visualStatus}
           sceneProgress={sceneProgress}
           scenesBySegment={scenesBySegment}
+          audioStatus={audioStatus}
+          audioSegments={audioSegments}
+          hookAudioUrl={hookAudioUrl}
+          fullAudioUrl={fullAudioUrl}
+          audioProgress={audioProgress}
           errorMessage={errorMessage}
           onGenerateVisuals={onGenerateVisuals}
+          onGenerateAudio={onGenerateAudio}
+          onResumeAudio={onResumeAudio}
           onRegenerate={onReset}
         />
       )}

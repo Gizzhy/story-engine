@@ -33,9 +33,16 @@ export default function StudioPage() {
     visualStatus,
     sceneProgress,
     scenesBySegment,
+    audioStatus,
+    audioSegments,
+    hookAudioUrl,
+    fullAudioUrl,
+    audioProgress,
     start,
     approve,
     generateVisuals,
+    generateAudio,
+    resumeAudio,
     reset,
   } = useGeneration();
 
@@ -61,8 +68,15 @@ export default function StudioPage() {
         visualStatus={visualStatus}
         sceneProgress={sceneProgress}
         scenesBySegment={scenesBySegment}
+        audioStatus={audioStatus}
+        audioSegments={audioSegments}
+        hookAudioUrl={hookAudioUrl}
+        fullAudioUrl={fullAudioUrl}
+        audioProgress={audioProgress}
         onApprove={approve}
         onGenerateVisuals={generateVisuals}
+        onGenerateAudio={generateAudio}
+        onResumeAudio={resumeAudio}
         onReset={reset}
       />
     </div>

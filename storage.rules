@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// Narration audio lives under audio/{jobId}/*.wav. It is written ONLY by the
+// Admin SDK inside Cloud Functions (which bypasses these rules); the client just
+// plays/downloads the files by their URL, so it needs public read and nothing
+// more. This mirrors the Firestore jobs rule (public read, no client writes).
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Public read for the audio path only — there is no login yet.
+    match /audio/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Everything else is locked down by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Generation, Scene, VisualStatus } from "@/lib/types";
+import type { AudioStatus, Generation, Scene, VisualStatus } from "@/lib/types";
 import type { WriteProgress } from "@/lib/useGeneration";
 
 interface StoryOutputProps {
@@ -9,8 +9,15 @@ interface StoryOutputProps {
   visualStatus: VisualStatus | null;
   sceneProgress: WriteProgress | null;
   scenesBySegment: Record<string, Scene[]> | null;
+  audioStatus: AudioStatus | null;
+  audioSegments: Record<string, string> | null;
+  hookAudioUrl: string | null;
+  fullAudioUrl: string | null;
+  audioProgress: WriteProgress | null;
   errorMessage: string | null;
   onGenerateVisuals: () => void;
+  onGenerateAudio: () => void;
+  onResumeAudio: () => void;
   onRegenerate: () => void;
 }
 
@@ -20,7 +27,8 @@ type Tab =
   | "scenes"
   | "hooks"
   | "thumbnail"
-  | "metadata";
+  | "metadata"
+  | "audio";
 
 /** End offset of `excerpt` within `text` (whitespace-tolerant), or null. */
 function findExcerptEnd(text: string, excerpt: string): number | null {
@@ -78,6 +86,14 @@ const VISUAL_STEPS: { key: VisualStatus; label: string }[] = [
   { key: "metadata", label: "Metadata" },
 ];
 
+// Audio phase stages, in order. `paused`/`error`/`done` are handled separately.
+const AUDIO_STEPS: { key: AudioStatus; label: string }[] = [
+  { key: "styling", label: "Preparing" },
+  { key: "audio", label: "Narration" },
+  { key: "hook", label: "Hook" },
+  { key: "stitching", label: "Stitching" },
+];
+
 function slugify(title: string): string {
   return (
     title
@@ -98,8 +114,15 @@ export default function StoryOutput({
   visualStatus,
   sceneProgress,
   scenesBySegment,
+  audioStatus,
+  audioSegments,
+  hookAudioUrl,
+  fullAudioUrl,
+  audioProgress,
   errorMessage,
   onGenerateVisuals,
+  onGenerateAudio,
+  onResumeAudio,
   onRegenerate,
 }: StoryOutputProps) {
   const [tab, setTab] = useState<Tab>("script");
@@ -151,6 +174,18 @@ export default function StoryOutput({
     ? VISUAL_STEPS.findIndex((s) => s.key === visualStatus)
     : -1;
 
+  // Audio phase. Segment URLs arrive keyed by index; sort them for display.
+  const audioStarted = audioStatus != null && audioStatus !== "idle";
+  const audioDone = audioStatus === "done";
+  const audioPaused = audioStatus === "paused";
+  const audioError = audioStatus === "error";
+  const audioSegmentEntries = audioSegments
+    ? Object.keys(audioSegments)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((i) => ({ index: i, url: audioSegments[String(i)] }))
+    : [];
+
   const storyText = `${generation.title}\n\n${segments.map((s) => s.text).join("\n\n")}`;
 
   async function copy(key: string, text: string) {
@@ -196,6 +231,11 @@ export default function StoryOutput({
     { key: "hooks", label: "Hooks", count: shots.length || undefined },
     { key: "thumbnail", label: "Thumbnail" },
     { key: "metadata", label: "Metadata" },
+    {
+      key: "audio",
+      label: "Audio",
+      count: audioSegmentEntries.length || undefined,
+    },
   ];
 
   // Shared shell for the visual tabs: kickoff CTA before generation, progress +
@@ -247,7 +287,7 @@ export default function StoryOutput({
               <BarButton onClick={onRegenerate}>Regenerate</BarButton>
             </div>
           </div>
-          <div className="-mb-px flex gap-1 overflow-x-auto">
+          <div className="-mb-px flex gap-1 overflow-x-hidden">
             {tabs.map((t) => {
               const active = t.key === tab;
               return (
@@ -643,6 +683,41 @@ export default function StoryOutput({
               <LoadingNote>Writing description, tags &amp; hashtags…</LoadingNote>
             ) : null,
           )}
+
+        {/* ── Audio (narration TTS) ──────────────────────────────── */}
+        {tab === "audio" &&
+          (!audioStarted ? (
+            <AudioCTA onGenerate={onGenerateAudio} />
+          ) : (
+            <div className="flex flex-col gap-6">
+              {!audioDone && !audioPaused && !audioError && (
+                <AudioProgress
+                  audioStatus={audioStatus}
+                  audioProgress={audioProgress}
+                />
+              )}
+              {audioPaused && <AudioPaused onResume={onResumeAudio} />}
+              {audioError && (
+                <p className="text-sm leading-relaxed text-muted">
+                  {errorMessage ?? "The audio phase hit a problem."}{" "}
+                  <button
+                    type="button"
+                    onClick={onGenerateAudio}
+                    className="font-medium text-petrol hover:text-petrol-bright"
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+              <AudioDeliverables
+                title={generation.title}
+                segments={audioSegmentEntries}
+                hookAudioUrl={hookAudioUrl}
+                fullAudioUrl={fullAudioUrl}
+                hookMissing={audioDone && !hookAudioUrl && !monologue}
+              />
+            </div>
+          ))}
       </article>
     </div>
   );
@@ -835,6 +910,191 @@ function VisualProgress({
         );
       })}
     </ol>
+  );
+}
+
+function AudioCTA({ onGenerate }: { onGenerate: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <p className="text-sm leading-relaxed text-muted">
+        Generate narration audio for this story — a voiced file per segment, a
+        separately-voiced cold-open hook, and a stitched full-story track, all
+        downloadable.
+      </p>
+      <button
+        type="button"
+        onClick={onGenerate}
+        className="rounded-md bg-petrol px-5 py-2.5 text-sm font-medium text-canvas transition-colors hover:bg-petrol-bright"
+      >
+        Generate audio
+      </button>
+    </div>
+  );
+}
+
+function AudioProgress({
+  audioStatus,
+  audioProgress,
+}: {
+  audioStatus: AudioStatus | null;
+  audioProgress: WriteProgress | null;
+}) {
+  const activeStep = audioStatus
+    ? AUDIO_STEPS.findIndex((s) => s.key === audioStatus)
+    : -1;
+  return (
+    <ol className="flex flex-wrap gap-x-2 gap-y-2">
+      {AUDIO_STEPS.map((step, i) => {
+        const isDone = i < activeStep;
+        const isActive = i === activeStep;
+        const showCount = isActive && step.key === "audio" && audioProgress;
+        return (
+          <li
+            key={step.key}
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
+              isActive
+                ? "border-petrol bg-petrol/10 text-ink"
+                : isDone
+                  ? "border-line text-muted"
+                  : "border-line text-faint"
+            }`}
+          >
+            <span aria-hidden>{isDone ? "✓" : isActive ? "●" : "○"}</span>
+            {step.label}
+            {showCount && (
+              <span className="font-mono text-[0.65rem] tabular-nums text-petrol">
+                {audioProgress!.current}/{audioProgress!.total}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function AudioPaused({ onResume }: { onResume: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-3 rounded-md border border-line border-l-2 border-l-petrol bg-surface/60 px-4 py-3">
+      <div>
+        <div className="text-sm font-medium text-ink">
+          Paused — daily voice quota reached
+        </div>
+        <p className="mt-1 text-sm leading-relaxed text-muted">
+          Your progress is saved. Resume once the quota resets (midnight
+          Pacific); already-voiced segments are kept.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onResume}
+        className="rounded-md bg-petrol px-4 py-2 text-sm font-medium text-canvas transition-colors hover:bg-petrol-bright"
+      >
+        Resume
+      </button>
+    </div>
+  );
+}
+
+/** The audio files, populated as URLs arrive: full story, hook, then segments. */
+function AudioDeliverables({
+  title,
+  segments,
+  hookAudioUrl,
+  fullAudioUrl,
+  hookMissing,
+}: {
+  title: string;
+  segments: { index: number; url: string }[];
+  hookAudioUrl: string | null;
+  fullAudioUrl: string | null;
+  hookMissing: boolean;
+}) {
+  const slug = slugify(title);
+  if (!fullAudioUrl && !hookAudioUrl && segments.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-6">
+      {fullAudioUrl && (
+        <AudioItem
+          label="Full narration"
+          sublabel="Complete story — segments stitched"
+          url={fullAudioUrl}
+          downloadName={`${slug}-full-narration.wav`}
+          prominent
+        />
+      )}
+      {hookAudioUrl && (
+        <AudioItem
+          label="Cold-open hook"
+          sublabel="Plays before the story"
+          url={hookAudioUrl}
+          downloadName={`${slug}-hook.wav`}
+        />
+      )}
+      {hookMissing && (
+        <p className="text-xs leading-relaxed text-faint">
+          No cold-open hook — run the visuals pass first to write the monologue,
+          then regenerate audio.
+        </p>
+      )}
+      {segments.length > 0 && (
+        <div>
+          <SectionHead title={`Segments · ${segments.length}`} />
+          <div className="mt-3 flex flex-col gap-2">
+            {segments.map((s) => (
+              <AudioItem
+                key={s.index}
+                label={`Segment ${s.index + 1}`}
+                url={s.url}
+                downloadName={`${slug}-segment-${s.index + 1}.wav`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One audio file: a native player + a best-effort download link. */
+function AudioItem({
+  label,
+  sublabel,
+  url,
+  downloadName,
+  prominent,
+}: {
+  label: string;
+  sublabel?: string;
+  url: string;
+  downloadName: string;
+  prominent?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-md border border-line px-4 py-3 ${
+        prominent
+          ? "border-l-2 border-l-petrol bg-surface/70"
+          : "bg-surface/50"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-ink">{label}</div>
+          {sublabel && <div className="text-xs text-muted">{sublabel}</div>}
+        </div>
+        <a
+          href={url}
+          download={downloadName}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 rounded-md border border-line px-2.5 py-1 font-mono text-[0.65rem] uppercase tracking-[0.15em] text-muted transition-colors hover:border-petrol/50 hover:text-petrol"
+        >
+          Download
+        </a>
+      </div>
+      <audio controls preload="none" src={url} className="mt-3 w-full" />
+    </div>
   );
 }
 

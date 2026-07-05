@@ -232,8 +232,41 @@ export interface Job {
   scenesBySegment?: Record<string, Scene[]>;
   /** The finished deliverable; the visual fields land here as they're produced. */
   generation?: Generation;
+  /** Lifecycle of the voice/TTS phase (an explicit step after status 'done'). */
+  audioStatus?: AudioStatus;
+  /**
+   * The per-story delivery prompts: the derived emotional tone joined with the
+   * fixed craft rules, one variant for narration and one for the cold-open hook.
+   */
+  audioStyle?: { narration: string; hook: string };
+  /**
+   * Per-segment narration audio URLs, keyed by segment index (a map, not an
+   * array) so Cloud Tasks retries overwrite the same key instead of appending.
+   */
+  audioSegments?: Record<string, string>;
+  /** The separately-voiced cold-open hook audio. */
+  hookAudioUrl?: string;
+  /** The stitched full-story narration (segments only; the hook stays separate). */
+  fullAudioUrl?: string;
+  /** Per-segment synthesis progress for the live "Segment X of N" audio view. */
+  audioProgress?: { current: number; total: number };
   error?: string;
 }
+
+/**
+ * Lifecycle of the voice/TTS phase, kicked off explicitly on a finished story.
+ * `paused` = the daily TTS quota was reached mid-run; progress is preserved and
+ * the job can be resumed (resumeAudio callable) once the quota resets.
+ */
+export type AudioStatus =
+  | 'idle'
+  | 'styling'
+  | 'audio'
+  | 'hook'
+  | 'stitching'
+  | 'paused'
+  | 'done'
+  | 'error';
 
 /** Lifecycle of the visual phase, mirroring the section order. */
 export type VisualStatus =

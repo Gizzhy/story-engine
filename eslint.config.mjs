@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Firebase Functions package is a separate project with its own
+    // toolchain/tsconfig; its compiled output lives in functions/lib. Keep it
+    // out of the Next app's lint scope.
+    "functions/**",
   ]),
 ]);
 
