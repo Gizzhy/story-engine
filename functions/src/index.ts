@@ -62,7 +62,7 @@ import {
   HOOK_CRAFT,
   CHUNK_TARGET_SECONDS,
 } from "./lib/voice";
-import { pcmToWav, concatWav, uploadAudio } from "./lib/audio";
+import { pcmToWav, concatWav, uploadAudio, uploadWav } from "./lib/audio";
 
 setGlobalOptions({ maxInstances: 10 });
 
@@ -1839,6 +1839,55 @@ export const resumeAudio = onCall<{ jobId: string }>(
     }
 
     return { ok: true };
+  },
+);
+
+/**
+ * TTS sandbox — synthesise arbitrary pasted text for voice/pace testing, with no
+ * job doc (ephemeral). Runs the EXACT same path as the pipeline: sub-chunked
+ * synthText (Algenib, RPM throttle, per-chunk retry/skip) → pcmToWav → upload,
+ * just to a sandbox/ path. `mode` picks the fixed craft. Long text runs many
+ * throttled calls, so this can take minutes — set a matching client timeout.
+ */
+export const synthTest = onCall<{ text: string; mode: "narration" | "hook" }>(
+  {
+    region: REGION,
+    secrets: [geminiKey],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (request) => {
+    const { text, mode } = request.data;
+    if (typeof text !== "string" || !text.trim()) {
+      throw new HttpsError("invalid-argument", "Provide some text to synthesize.");
+    }
+
+    const style = mode === "hook" ? HOOK_CRAFT : NARRATION_CRAFT;
+    try {
+      const ai = new GoogleGenAI({ apiKey: geminiKey.value() });
+      const pcm = await synthText(ai, style, text);
+      const wav = pcmToWav(pcm, VOICE_CONFIG.sampleRate);
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const url = await uploadWav(`sandbox/${id}.wav`, wav);
+      return { ok: true, url };
+    } catch (error) {
+      if (error instanceof DailyQuotaError) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Daily TTS quota reached — try again after it resets (midnight Pacific).",
+        );
+      }
+      if (classify429(error) === "transient") {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Hit the per-minute rate limit — wait a moment and try again.",
+        );
+      }
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "Synthesis failed.",
+      );
+    }
   },
 );
 

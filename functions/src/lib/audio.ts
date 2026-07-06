@@ -90,17 +90,15 @@ export function concatWav(wavBuffers: Buffer[]): Buffer {
 }
 
 /**
- * Save a WAV to Storage at audio/{jobId}/{name}.wav and return a long-lived,
- * login-less download URL. We attach a Firebase download token so the URL never
- * expires (no signing credentials or public-ACL dependency).
+ * Save a WAV at an exact Storage path and return a long-lived, login-less
+ * download URL. We attach a Firebase download token so the URL never expires (no
+ * signing credentials or public-ACL dependency).
  */
-export async function uploadAudio(
-  jobId: string,
-  name: string,
+export async function uploadWav(
+  path: string,
   wavBuffer: Buffer,
 ): Promise<string> {
   const bucket = getStorage().bucket(defaultBucketName());
-  const path = `audio/${jobId}/${name}.wav`;
   const file = bucket.file(path);
   const token = randomUUID();
 
@@ -114,4 +112,13 @@ export async function uploadAudio(
     `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
     `${encodeURIComponent(path)}?alt=media&token=${token}`
   );
+}
+
+/** Save a job's narration audio at audio/{jobId}/{name}.wav. */
+export async function uploadAudio(
+  jobId: string,
+  name: string,
+  wavBuffer: Buffer,
+): Promise<string> {
+  return uploadWav(`audio/${jobId}/${name}.wav`, wavBuffer);
 }
