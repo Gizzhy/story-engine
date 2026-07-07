@@ -20,7 +20,12 @@ import {
 } from "firebase-admin/firestore";
 import { getFunctions } from "firebase-admin/functions";
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenAI, Modality } from "@google/genai";
+import {
+  GoogleGenAI,
+  Modality,
+  HarmCategory,
+  HarmBlockThreshold,
+} from "@google/genai";
 import { z } from "zod";
 
 import { dnaPrompt } from "./prompts/dna";
@@ -1312,18 +1317,31 @@ function silencePad(): Buffer {
   return Buffer.alloc(samples * 2); // 2 bytes/sample, zeros = silence
 }
 
-/** One Gemini TTS call → raw PCM (16-bit mono @ VOICE_CONFIG.sampleRate). */
+// Fictional narration (thriller/horror menace, threat, crime language) trips
+// content-safety false positives that return a 200 with NO audio. Set every
+// adjustable filter to the most permissive threshold — appropriate for this
+// fictional-narration use case — so legitimate story text isn't silently blocked.
+const SAFETY_SETTINGS = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+].map((category) => ({ category, threshold: HarmBlockThreshold.BLOCK_NONE }));
+
+/** One Gemini TTS call on a given model → raw PCM (16-bit mono @ sampleRate). */
 async function synthPcm(
   ai: GoogleGenAI,
   prompt: string,
+  model: string,
 ): Promise<{ pcm: Buffer; finishReason: string }> {
   // Space requests apart so we stay under the per-minute RPM ceiling.
   await throttleTts();
   const response = await ai.models.generateContent({
-    model: VOICE_CONFIG.model,
+    model,
     contents: prompt,
     config: {
       responseModalities: [Modality.AUDIO],
+      safetySettings: SAFETY_SETTINGS,
       speechConfig: {
         voiceConfig: {
           prebuiltVoiceConfig: { voiceName: VOICE_CONFIG.voice },
@@ -1333,11 +1351,17 @@ async function synthPcm(
   });
   const candidate = response.candidates?.[0];
   const finishReason = String(candidate?.finishReason ?? "");
+  const blockReason = response.promptFeedback?.blockReason;
   const data = candidate?.content?.parts?.[0]?.inlineData?.data;
   if (!data) {
-    throw new Error(
-      `Gemini TTS returned no audio data (finishReason=${finishReason || "none"}).`,
-    );
+    // A blocked/empty result (200 with no audio) — surface why so synthChunk can
+    // retry and, if it persists, log the offending passage.
+    const why = blockReason
+      ? `blocked: ${blockReason}`
+      : finishReason && finishReason !== "STOP"
+        ? `finishReason=${finishReason}`
+        : "empty response (no audio)";
+    throw new Error(`Gemini TTS returned no audio data (${why}).`);
   }
   return { pcm: Buffer.from(data, "base64"), finishReason };
 }
@@ -1366,15 +1390,73 @@ function chunkBySentence(text: string, maxWords: number): string[] {
   return chunks;
 }
 
+/** Model chain: try the primary, then the stable fallback for stubborn chunks. */
+const TTS_MODELS: string[] = [
+  ...new Set<string>([VOICE_CONFIG.model, VOICE_CONFIG.fallbackModel]),
+];
+
 /**
- * Synthesise ONE short sub-chunk to PCM, resilient to both bad results and thrown
- * errors. Retries (with backoff) on a suspect result — non-STOP finish or audio
- * far shorter than the text warrants — and on a thrown call error (transient 400
- * from the preview model, or a 429 rate limit). After exhausting tries:
- *  - if we got any audio, keep the best-effort take (a merely-suspect result);
- *  - else, a repeatable INVALID_ARGUMENT ("poison" chunk) is SKIPPED so it can't
- *    permanently block the whole story; any other error (e.g. sustained rate
- *    limit) is rethrown so Cloud Tasks retries the segment.
+ * Try one model for a sub-chunk: retry (with backoff) on a suspect result or a
+ * thrown call error. Returns audio (even a merely-suspect best-effort take) or
+ * `null` if the model produced NO audio after all tries. DailyQuotaError bubbles
+ * up immediately (pause the job); the last error reason is returned for logging.
+ */
+async function synthChunkOnModel(
+  ai: GoogleGenAI,
+  style: string,
+  chunk: string,
+  model: string,
+  words: number,
+  minExpectedSec: number,
+): Promise<{ pcm: Buffer | null; reason: string }> {
+  let best: Buffer | null = null;
+  let reason = "";
+  for (let attempt = 1; attempt <= CHUNK_MAX_TRIES; attempt++) {
+    let backoffMs = attempt * 3000; // default for suspect-result retries
+    try {
+      const { pcm, finishReason } = await synthPcm(ai, `${style}\n\n${chunk}`, model);
+      best = pcm;
+      const durSec = pcmDurationSec(pcm);
+      const truncated = finishReason !== "" && finishReason !== "STOP";
+      const tooShort = words >= 8 && durSec < minExpectedSec;
+      if (!truncated && !tooShort) return { pcm, reason: "" };
+      console.warn(
+        `TTS sub-chunk suspect (model=${model}, attempt ${attempt}/${CHUNK_MAX_TRIES}, ` +
+          `words=${words}, dur=${durSec.toFixed(1)}s, finishReason=${finishReason || "none"}).`,
+      );
+    } catch (error) {
+      // Daily quota (RPD) won't recover until reset — bail immediately (no
+      // retries) so the caller can pause the job instead of burning attempts.
+      if (classify429(error) === "daily") throw new DailyQuotaError();
+      reason = error instanceof Error ? error.message : String(error);
+      // Per-minute (RPM) 429s tell us exactly how long to wait — honor it (+1s
+      // buffer) instead of a fixed backoff.
+      const retrySec = parseRetryDelaySec(error);
+      if (retrySec != null) backoffMs = Math.round((retrySec + 1) * 1000);
+      console.warn(
+        `TTS sub-chunk call failed (model=${model}, attempt ${attempt}/${CHUNK_MAX_TRIES}, ` +
+          `words=${words}, backoff=${(backoffMs / 1000).toFixed(0)}s): ${reason.slice(0, 160)}`,
+      );
+    }
+    if (attempt < CHUNK_MAX_TRIES) await sleep(backoffMs);
+  }
+  if (best) {
+    console.error(
+      `TTS sub-chunk degraded after ${CHUNK_MAX_TRIES} tries (model=${model}, ` +
+        `words=${words}); using best-effort audio.`,
+    );
+    return { pcm: best, reason: "" };
+  }
+  return { pcm: null, reason };
+}
+
+/**
+ * Synthesise ONE short sub-chunk to PCM, resilient to bad results and thrown
+ * errors. Retries per model, and if the primary model produces no audio at all
+ * (e.g. the 3.1 preview's intermittent spurious 400), falls back to the stable
+ * model for this chunk. If NO model produces audio, logs the exact offending
+ * passage and rethrows so the SEGMENT FAILS — never ship a silent gap (a segment
+ * is only written complete when every sub-chunk produced audio).
  */
 async function synthChunk(
   ai: GoogleGenAI,
@@ -1383,52 +1465,37 @@ async function synthChunk(
 ): Promise<Buffer> {
   const words = countWords(chunk);
   const minExpectedSec = (words / WORDS_PER_SEC_FAST) * 0.5;
-  let best: Buffer | null = null;
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= CHUNK_MAX_TRIES; attempt++) {
-    let backoffMs = attempt * 3000; // default for suspect-result retries
-    try {
-      const { pcm, finishReason } = await synthPcm(ai, `${style}\n\n${chunk}`);
-      best = pcm;
-      const durSec = pcmDurationSec(pcm);
-      const truncated = finishReason !== "" && finishReason !== "STOP";
-      const tooShort = words >= 8 && durSec < minExpectedSec;
-      if (!truncated && !tooShort) return pcm;
+  let reason = "";
+  for (let mi = 0; mi < TTS_MODELS.length; mi++) {
+    const model = TTS_MODELS[mi];
+    const res = await synthChunkOnModel(
+      ai,
+      style,
+      chunk,
+      model,
+      words,
+      minExpectedSec,
+    );
+    if (res.pcm) return res.pcm;
+    reason = res.reason;
+    if (mi < TTS_MODELS.length - 1) {
       console.warn(
-        `TTS sub-chunk suspect (attempt ${attempt}/${CHUNK_MAX_TRIES}, ` +
-          `words=${words}, dur=${durSec.toFixed(1)}s, finishReason=${finishReason || "none"}).`,
-      );
-    } catch (error) {
-      // Daily quota (RPD) won't recover until reset — bail immediately (no
-      // retries) so the caller can pause the job instead of burning attempts.
-      if (classify429(error) === "daily") throw new DailyQuotaError();
-      lastError = error;
-      const msg = error instanceof Error ? error.message : String(error);
-      // Per-minute (RPM) 429s tell us exactly how long to wait — honor it (+1s
-      // buffer) instead of a fixed backoff.
-      const retrySec = parseRetryDelaySec(error);
-      if (retrySec != null) backoffMs = Math.round((retrySec + 1) * 1000);
-      console.warn(
-        `TTS sub-chunk call failed (attempt ${attempt}/${CHUNK_MAX_TRIES}, ` +
-          `words=${words}, backoff=${(backoffMs / 1000).toFixed(0)}s): ${msg.slice(0, 160)}`,
+        `TTS sub-chunk got no audio on ${model} — falling back to ` +
+          `${TTS_MODELS[mi + 1]} (words=${words}, reason=${reason.slice(0, 120)}).`,
       );
     }
-    if (attempt < CHUNK_MAX_TRIES) await sleep(backoffMs);
   }
-  if (best) {
-    console.error(
-      `TTS sub-chunk degraded after ${CHUNK_MAX_TRIES} tries (words=${words}); using best-effort audio.`,
-    );
-    return best;
-  }
-  const msg = lastError instanceof Error ? lastError.message : String(lastError);
-  if (/INVALID_ARGUMENT/.test(msg)) {
-    console.error(
-      `TTS sub-chunk permanently rejected (INVALID_ARGUMENT); SKIPPING ~${words} words to keep the segment alive.`,
-    );
-    return Buffer.alloc(0);
-  }
-  throw lastError;
+  // No audio on any model. Do NOT skip/return silence — that would ship a gap and
+  // let the segment be written complete. Log the EXACT passage and fail loudly.
+  console.error(
+    `TTS sub-chunk produced NO AUDIO on all models (words=${words}, ` +
+      `reason=${reason}). The passage was not voiced — failing the segment. ` +
+      `Chunk text: ${JSON.stringify(chunk)}`,
+  );
+  throw new Error(
+    `Sub-chunk produced no audio (${reason}). Passage: "${chunk.slice(0, 120)}` +
+      `${chunk.length > 120 ? "…" : ""}"`,
+  );
 }
 
 /**

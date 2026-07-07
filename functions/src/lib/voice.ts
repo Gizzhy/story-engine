@@ -9,9 +9,13 @@ export const VOICE_CONFIG = {
   // Preferred voice: 3.1 Flash TTS. The live id needs the `-preview` suffix —
   // the bare `gemini-3.1-flash-tts` returns NOT_FOUND. Long single-request
   // outputs fade/degrade on this model (and 2.5), so synthSegment sub-chunks
-  // every call to keep it in its good zone. Stable fallback:
-  // "gemini-2.5-flash-preview-tts".
+  // every call to keep it in its good zone.
   model: "gemini-3.1-flash-tts-preview",
+  // The 3.1 preview intermittently throws a spurious 400 INVALID_ARGUMENT on the
+  // exact same (benign) request — a model bug, not a content/safety issue. The
+  // stable 2.5 preview handles those reliably, so a sub-chunk that keeps failing
+  // on the primary falls back to this model (same Algenib voice; per-chunk only).
+  fallbackModel: "gemini-2.5-flash-preview-tts",
   voice: "Algenib",
   sampleRate: 24000,
 } as const;
