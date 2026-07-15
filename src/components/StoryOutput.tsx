@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AudioStatus, Generation, Scene, VisualStatus } from "@/lib/types";
 import type { WriteProgress } from "@/lib/useGeneration";
 
@@ -94,6 +94,62 @@ const AUDIO_STEPS: { key: AudioStatus; label: string }[] = [
   { key: "stitching", label: "Stitching" },
 ];
 
+/** A stable DOM id for a character's Characters-tab card (jump target). */
+function charAnchorId(name: string): string {
+  return `char-${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")}`;
+}
+
+/**
+ * The "Attach" row for a scene / shot: which character reference images to bring
+ * into Whisk, read straight from its `present` names — no need to parse the long
+ * image prompt. Known characters render as chips that jump to their reference in
+ * the Characters tab; an empty `present` shows a faint "none" (no reference).
+ */
+function AttachRow({
+  present,
+  knownNames,
+  onJump,
+}: {
+  present: string[];
+  knownNames: Set<string>;
+  onJump: (name: string) => void;
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+      <span className="font-mono text-[0.55rem] uppercase tracking-[0.2em] text-faint">
+        Attach
+      </span>
+      {present.length === 0 ? (
+        <span className="text-xs text-faint">none</span>
+      ) : (
+        present.map((name) =>
+          knownNames.has(name) ? (
+            <button
+              key={name}
+              type="button"
+              onClick={() => onJump(name)}
+              title="Jump to this character's reference"
+              className="rounded-full border border-petrol/40 bg-petrol/10 px-2 py-0.5 text-xs text-petrol transition-colors hover:bg-petrol/20"
+            >
+              {name}
+            </button>
+          ) : (
+            <span
+              key={name}
+              className="rounded-full border border-line bg-surface px-2 py-0.5 text-xs text-muted"
+            >
+              {name}
+            </span>
+          ),
+        )
+      )}
+    </div>
+  );
+}
+
 function slugify(title: string): string {
   return (
     title
@@ -128,9 +184,13 @@ export default function StoryOutput({
   const [tab, setTab] = useState<Tab>("script");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showInlineScenes, setShowInlineScenes] = useState(true);
+  // A character to scroll to after switching to the Characters tab (cross-tab
+  // jump). Held in a ref so the scroll effect never calls setState.
+  const pendingCharRef = useRef<string | null>(null);
 
   const segments = [...generation.segments].sort((a, b) => a.index - b.index);
   const characters = generation.characters ?? [];
+  const knownNames = new Set(characters.map((c) => c.name));
   const scenes = generation.scenes ?? [];
   const monologue = generation.hooks?.monologue;
   const shots = generation.hooks?.shots ?? [];
@@ -223,6 +283,30 @@ export default function StoryOutput({
       .getElementById(`seg-${seg.index}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  // Jump from a scene/shot "Attach" chip to that character's reference. If we're
+  // already on the Characters tab, scroll now; otherwise switch tabs and let the
+  // effect below scroll once the card has mounted.
+  function jumpToCharacter(name: string) {
+    if (tab === "characters") {
+      document
+        .getElementById(charAnchorId(name))
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      pendingCharRef.current = name;
+      setTab("characters");
+    }
+  }
+
+  // After a cross-tab jump, scroll once the Characters tab has mounted.
+  useEffect(() => {
+    if (tab !== "characters" || !pendingCharRef.current) return;
+    const name = pendingCharRef.current;
+    pendingCharRef.current = null;
+    document
+      .getElementById(charAnchorId(name))
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [tab]);
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "script", label: "Script" },
@@ -390,6 +474,8 @@ export default function StoryOutput({
                           onCopy={() =>
                             copy(`iscene-${node.scene.index}`, node.scene.imagePrompt)
                           }
+                          knownNames={knownNames}
+                          onJump={jumpToCharacter}
                         />
                       ),
                     )}
@@ -405,6 +491,8 @@ export default function StoryOutput({
                       segmentLabel={null}
                       copied={copiedKey === `iscene-${scene.index}`}
                       onCopy={() => copy(`iscene-${scene.index}`, scene.imagePrompt)}
+                      knownNames={knownNames}
+                      onJump={jumpToCharacter}
                     />
                   ))}
                 </div>
@@ -435,7 +523,8 @@ export default function StoryOutput({
                   {characters.map((c, i) => (
                     <div
                       key={c.name}
-                      className="rounded-md border border-line bg-surface/60 px-4 py-3"
+                      id={charAnchorId(c.name)}
+                      className="scroll-mt-28 rounded-md border border-line bg-surface/60 px-4 py-3"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -492,11 +581,18 @@ export default function StoryOutput({
                         key={seg.index}
                         segmentIndex={seg.index}
                         scenes={grp}
+                        knownNames={knownNames}
+                        onJump={jumpToCharacter}
                       />
                     );
                   })}
                   {orphanScenes.length > 0 && (
-                    <SceneGroup segmentIndex={null} scenes={orphanScenes} />
+                    <SceneGroup
+                      segmentIndex={null}
+                      scenes={orphanScenes}
+                      knownNames={knownNames}
+                      onJump={jumpToCharacter}
+                    />
                   )}
                 </div>
               </div>
@@ -572,7 +668,14 @@ export default function StoryOutput({
                             </p>
                           )}
 
-                          <p className="mt-2 font-mono text-xs leading-relaxed text-muted">
+                          <div className="mt-2">
+                            <AttachRow
+                              present={s.present}
+                              knownNames={knownNames}
+                              onJump={jumpToCharacter}
+                            />
+                          </div>
+                          <p className="font-mono text-xs leading-relaxed text-muted">
                             {s.imagePrompt}
                           </p>
                           {s.motion && (
@@ -757,11 +860,15 @@ function InlineSceneChip({
   segmentLabel,
   copied,
   onCopy,
+  knownNames,
+  onJump,
 }: {
   scene: Scene;
   segmentLabel: number | null;
   copied: boolean;
   onCopy: () => void;
+  knownNames: Set<string>;
+  onJump: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -795,7 +902,14 @@ function InlineSceneChip({
         </button>
         <GhostButton onClick={onCopy}>{copied ? "Copied" : "Copy"}</GhostButton>
       </div>
-      <p className="mt-1.5 font-mono text-xs leading-relaxed text-muted">
+      <div className="mt-2">
+        <AttachRow
+          present={scene.present}
+          knownNames={knownNames}
+          onJump={onJump}
+        />
+      </div>
+      <p className="font-mono text-xs leading-relaxed text-muted">
         {scene.imagePrompt}
       </p>
       {scene.motionPriority === "animate" && scene.motion && (
@@ -811,9 +925,13 @@ function InlineSceneChip({
 function SceneGroup({
   segmentIndex,
   scenes,
+  knownNames,
+  onJump,
 }: {
   segmentIndex: number | null;
   scenes: Scene[];
+  knownNames: Set<string>;
+  onJump: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -836,7 +954,12 @@ function SceneGroup({
         <ol className="flex flex-col gap-3 border-t border-line px-4 py-3 font-mono text-xs leading-relaxed">
           {scenes.map((s) => (
             <li key={s.index} className="text-muted">
-              <span className="text-petrol">Scene {s.index + 1}:</span>{" "}
+              <div className="mb-1 text-petrol">Scene {s.index + 1}</div>
+              <AttachRow
+                present={s.present}
+                knownNames={knownNames}
+                onJump={onJump}
+              />
               {s.imagePrompt}
               {s.motionPriority === "animate" && s.motion && (
                 <div className="mt-1 text-faint">Motion: {s.motion}</div>
