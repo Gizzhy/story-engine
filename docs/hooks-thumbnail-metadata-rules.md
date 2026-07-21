@@ -107,11 +107,20 @@ export const thumbnailPrompt = {
 You are writing ONE high-CTR YouTube thumbnail prompt — a standalone cover engineered to maximize
 clicks. Not part of the narrated sequence.
 
-High-CTR rules:
-- One bold focal point; clear, often heightened emotion on a human face.
-- Strong contrast and composition; instantly readable as a tiny image.
-- Leave clear negative space for a title text overlay.
-- Capture the story's most clickable moment to spark curiosity — without spoiling the ending.
+Compose every thumbnail as a SINGLE-SUBJECT, high-emotion, power-contrast image — never a balanced
+split-screen:
+- ONE dominant subject whose face fills most of the frame, caught at the PEAK of a single raw emotion
+  (devastation, realization, fury, heartbreak) — extreme close-up energy. The face is the whole image.
+- Stage the story's power dynamic through COMPOSITION, not a split layout: place the other key character
+  small, behind, and thrown out of focus in the background, so their size / focus / lighting contrast
+  tells the relationship at a glance (victim vs the one in control, etc.).
+- Use lighting contrast between the two — warm light on the emotional lead falling to cold shadow toward
+  the other — to reinforce the dynamic.
+- TEASE, never spoil: show the emotional aftermath / reaction, not the reveal itself.
+- Do NOT use split-screen, balanced two-shot, or side-by-side layouts unless the story genuinely has no
+  single emotional focal point — a single dominant subject is strongly preferred.
+- Keep clear negative space (usually the upper third) for a bold title text overlay.
+- Instantly readable as a tiny image; strong contrast and composition.
 - Everything human and real — no cartoon, no animation.
 
 If the protagonist is featured, they should be recognizably the story's lead. Do NOT write their
@@ -139,6 +148,9 @@ Note: thumbnail aesthetic (real photo) intentionally differs from the rendered s
 1. Style: **high-CTR cinematic** (not the plain summary option). ✅
 2. Aesthetic: **Camera-Realism**, photoreal — thumbnail only. ✅
 3. Protagonist featured when it helps CTR; verbatim identity for likeness. ✅
+4. Composition: **single dominant subject, extreme-close-up peak emotion**, with the power dynamic staged
+   through size/focus/lighting contrast (the other character small, behind, out of focus). **No balanced
+   split-screens / two-shots** unless there's genuinely no single emotional focal point. ✅
 
 ---
 
