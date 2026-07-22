@@ -29,8 +29,10 @@ interface ResultsCanvasProps {
   hookAudioUrl: string | null;
   fullAudioUrl: string | null;
   audioProgress: WriteProgress | null;
+  thumbnailError: string | null;
   onApprove: (chosenTitle: string) => void;
   onGenerateVisuals: () => void;
+  onRegenerateThumbnail: () => void;
   onGenerateAudio: () => void;
   onResumeAudio: () => void;
   onReset: () => void;
@@ -56,8 +58,10 @@ export default function ResultsCanvas({
   hookAudioUrl,
   fullAudioUrl,
   audioProgress,
+  thumbnailError,
   onApprove,
   onGenerateVisuals,
+  onRegenerateThumbnail,
   onGenerateAudio,
   onResumeAudio,
   onReset,
@@ -95,8 +99,10 @@ export default function ResultsCanvas({
           hookAudioUrl={hookAudioUrl}
           fullAudioUrl={fullAudioUrl}
           audioProgress={audioProgress}
+          thumbnailError={thumbnailError}
           errorMessage={errorMessage}
           onGenerateVisuals={onGenerateVisuals}
+          onRegenerateThumbnail={onRegenerateThumbnail}
           onGenerateAudio={onGenerateAudio}
           onResumeAudio={onResumeAudio}
           onRegenerate={onReset}

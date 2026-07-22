@@ -38,9 +38,11 @@ export default function StudioPage() {
     hookAudioUrl,
     fullAudioUrl,
     audioProgress,
+    thumbnailError,
     start,
     approve,
     generateVisuals,
+    regenerateThumbnail,
     generateAudio,
     resumeAudio,
     reset,
@@ -73,8 +75,10 @@ export default function StudioPage() {
         hookAudioUrl={hookAudioUrl}
         fullAudioUrl={fullAudioUrl}
         audioProgress={audioProgress}
+        thumbnailError={thumbnailError}
         onApprove={approve}
         onGenerateVisuals={generateVisuals}
+        onRegenerateThumbnail={regenerateThumbnail}
         onGenerateAudio={generateAudio}
         onResumeAudio={resumeAudio}
         onReset={reset}

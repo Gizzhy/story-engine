@@ -14,8 +14,10 @@ interface StoryOutputProps {
   hookAudioUrl: string | null;
   fullAudioUrl: string | null;
   audioProgress: WriteProgress | null;
+  thumbnailError: string | null;
   errorMessage: string | null;
   onGenerateVisuals: () => void;
+  onRegenerateThumbnail: () => void;
   onGenerateAudio: () => void;
   onResumeAudio: () => void;
   onRegenerate: () => void;
@@ -175,8 +177,10 @@ export default function StoryOutput({
   hookAudioUrl,
   fullAudioUrl,
   audioProgress,
+  thumbnailError,
   errorMessage,
   onGenerateVisuals,
+  onRegenerateThumbnail,
   onGenerateAudio,
   onResumeAudio,
   onRegenerate,
@@ -187,6 +191,22 @@ export default function StoryOutput({
   // A character to scroll to after switching to the Characters tab (cross-tab
   // jump). Held in a ref so the scroll effect never calls setState.
   const pendingCharRef = useRef<string | null>(null);
+
+  // Thumbnail re-roll: capture the newest variant's timestamp at click; `regen`
+  // is derived (no effect, no ref-in-render) — true until a newer take or an
+  // error lands.
+  const [regenBaselineAt, setRegenBaselineAt] = useState<number | null>(null);
+  const thumbnailVariants = generation.thumbnailVariants ?? [];
+  const newestVariantAt = thumbnailVariants[0]?.createdAt ?? 0;
+  const regeneratingThumb =
+    regenBaselineAt !== null &&
+    !thumbnailError &&
+    newestVariantAt === regenBaselineAt;
+
+  function handleRegenerateThumbnail() {
+    setRegenBaselineAt(newestVariantAt);
+    onRegenerateThumbnail();
+  }
 
   const segments = [...generation.segments].sort((a, b) => a.index - b.index);
   const characters = generation.characters ?? [];
@@ -699,17 +719,84 @@ export default function StoryOutput({
           visualTab(
             "the thumbnail prompt",
             thumbnail ? (
-              <div>
-                <div className="flex items-center justify-end">
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRegenerateThumbnail}
+                    disabled={regeneratingThumb}
+                    className="rounded-md bg-petrol px-4 py-2 text-sm font-medium text-canvas transition-colors hover:bg-petrol-bright disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {regeneratingThumb ? "Regenerating…" : "Regenerate thumbnail"}
+                  </button>
                   <GhostButton onClick={() => copy("thumb", thumbnail)}>
                     {label("thumb", "Copy")}
                   </GhostButton>
                 </div>
-                <div className="mt-3 rounded-md border border-line bg-surface/60 px-4 py-3">
+
+                {regeneratingThumb && (
+                  <LoadingNote>Composing a new thumbnail…</LoadingNote>
+                )}
+                {thumbnailError && (
+                  <p className="text-sm leading-relaxed text-muted">
+                    Re-roll failed: {thumbnailError}
+                  </p>
+                )}
+
+                {/* Current take */}
+                <div className="rounded-md border border-line border-l-2 border-l-petrol bg-surface/70 px-4 py-3">
+                  <div className="mb-1.5 font-mono text-[0.6rem] uppercase tracking-[0.18em] text-petrol">
+                    Current
+                  </div>
+                  {thumbnailVariants[0]?.featured?.length ? (
+                    <AttachRow
+                      present={thumbnailVariants[0].featured}
+                      knownNames={knownNames}
+                      onJump={jumpToCharacter}
+                    />
+                  ) : null}
                   <p className="font-mono text-xs leading-relaxed text-muted">
                     {thumbnail}
                   </p>
                 </div>
+
+                {/* Previous takes (kept for compare/copy; capped at 3 total) */}
+                {thumbnailVariants.length > 1 && (
+                  <div>
+                    <SectionHead
+                      title={`Previous takes · ${thumbnailVariants.length - 1}`}
+                    />
+                    <div className="mt-3 flex flex-col gap-2">
+                      {thumbnailVariants.slice(1).map((v, i) => (
+                        <div
+                          key={v.createdAt}
+                          className="rounded-md border border-line bg-surface/50 px-4 py-3"
+                        >
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="font-mono text-[0.6rem] uppercase tracking-[0.15em] text-faint">
+                              Take {thumbnailVariants.length - 1 - i}
+                            </span>
+                            <GhostButton
+                              onClick={() => copy(`tvar-${v.createdAt}`, v.prompt)}
+                            >
+                              {label(`tvar-${v.createdAt}`, "Copy")}
+                            </GhostButton>
+                          </div>
+                          {v.featured?.length ? (
+                            <AttachRow
+                              present={v.featured}
+                              knownNames={knownNames}
+                              onJump={jumpToCharacter}
+                            />
+                          ) : null}
+                          <p className="font-mono text-xs leading-relaxed text-muted">
+                            {v.prompt}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : loading("thumbnail", !!thumbnail) ? (
               <LoadingNote>Composing the thumbnail…</LoadingNote>

@@ -49,12 +49,16 @@ export interface UseGeneration {
   fullAudioUrl: string | null;
   /** Per-segment synthesis progress for "Segment X of N". */
   audioProgress: WriteProgress | null;
+  /** Error from a thumbnail-only re-roll (separate from the visual-phase error). */
+  thumbnailError: string | null;
   /** Begin a run: invoke startJob, then subscribe to the job doc. */
   start: (input: GenerationInput) => Promise<void>;
   /** Approve the blueprint: invoke approveJob; the doc's status drives the UI. */
   approve: (chosenTitle: string) => Promise<void>;
   /** Kick off the visual phase: invoke generateVisuals; the doc drives the UI. */
   generateVisuals: () => Promise<void>;
+  /** Re-roll only the thumbnail; the doc's generation.thumbnail* drives the UI. */
+  regenerateThumbnail: () => Promise<void>;
   /** Kick off the voice/TTS phase: invoke generateAudio; the doc drives the UI. */
   generateAudio: () => Promise<void>;
   /** Resume a quota-paused audio job: invoke resumeAudio; the doc drives the UI. */
@@ -111,6 +115,7 @@ export function useGeneration(): UseGeneration {
   const [hookAudioUrl, setHookAudioUrl] = useState<string | null>(null);
   const [fullAudioUrl, setFullAudioUrl] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState<WriteProgress | null>(null);
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null);
 
   const unsubscribe = useRef<(() => void) | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -145,6 +150,7 @@ export function useGeneration(): UseGeneration {
           setHookAudioUrl(data.hookAudioUrl ?? null);
           setFullAudioUrl(data.fullAudioUrl ?? null);
           setAudioProgress(data.audioProgress ?? null);
+          setThumbnailError(data.thumbnailError ?? null);
           // The main job, the visual phase, or the audio phase can carry an error.
           if (
             data.status === "error" ||
@@ -177,6 +183,7 @@ export function useGeneration(): UseGeneration {
     setHookAudioUrl(null);
     setFullAudioUrl(null);
     setAudioProgress(null);
+    setThumbnailError(null);
   }, []);
 
   const start = useCallback(
@@ -239,6 +246,19 @@ export function useGeneration(): UseGeneration {
         err instanceof Error ? err.message : "Failed to start visuals.",
       );
     }
+  }, []);
+
+  const regenerateThumbnail = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    // Clear any prior re-roll error locally; the new prompt/variants and any
+    // fresh error arrive via the doc snapshot.
+    setThumbnailError(null);
+    const callable = httpsCallable<{ jobId: string }, { ok: boolean }>(
+      functions,
+      "regenerateThumbnail",
+    );
+    await callable({ jobId });
   }, []);
 
   const generateAudio = useCallback(async () => {
@@ -311,9 +331,11 @@ export function useGeneration(): UseGeneration {
     hookAudioUrl,
     fullAudioUrl,
     audioProgress,
+    thumbnailError,
     start,
     approve,
     generateVisuals,
+    regenerateThumbnail,
     generateAudio,
     resumeAudio,
     reset,

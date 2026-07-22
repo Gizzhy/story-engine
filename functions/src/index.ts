@@ -1059,72 +1059,107 @@ export const generateHooks = onTaskDispatched<{ jobId: string }>(
   },
 );
 
+interface ThumbnailVariant {
+  prompt: string;
+  featured: string[];
+  createdAt: number;
+}
+
 /**
  * Phase 4 — Thumbnail. One high-CTR cover prompt, assembled with Camera-Realism
- * (the only place it's used). Idempotent: skips if the thumbnail prompt exists.
+ * (the only place it's used). Idempotent in the normal pipeline: skips if the
+ * thumbnail prompt exists. `force` (from regenerateThumbnail) re-rolls it even
+ * when one exists, keeps the 3 most recent as thumbnailVariants, and does NOT
+ * touch visualStatus or chain to metadata — it's a thumbnail-only regenerate.
  */
-export const generateThumbnail = onTaskDispatched<{ jobId: string }>(
-  VISUAL_TASK_OPTS,
-  async (req) => {
-    const { jobId } = req.data;
-    const jobRef = db.collection("jobs").doc(jobId);
+export const generateThumbnail = onTaskDispatched<{
+  jobId: string;
+  force?: boolean;
+}>(VISUAL_TASK_OPTS, async (req) => {
+  const { jobId, force } = req.data;
+  const jobRef = db.collection("jobs").doc(jobId);
 
-    try {
-      const snap = await jobRef.get();
-      if (!snap.exists) return;
+  try {
+    const snap = await jobRef.get();
+    if (!snap.exists) return;
 
-      const data = snap.data() as {
-        blueprint?: Blueprint;
-        styleMood?: string;
-        generation?: { characters?: VisualCharacter[]; thumbnailPrompt?: string };
+    const data = snap.data() as {
+      blueprint?: Blueprint;
+      styleMood?: string;
+      generation?: {
+        characters?: VisualCharacter[];
+        thumbnailPrompt?: string;
+        thumbnailVariants?: ThumbnailVariant[];
       };
+    };
 
-      const blueprint = data.blueprint;
-      if (!blueprint) return;
-      const characters = data.generation?.characters ?? [];
-      const styleMood = data.styleMood ?? "";
+    const blueprint = data.blueprint;
+    if (!blueprint) return;
+    const characters = data.generation?.characters ?? [];
+    const styleMood = data.styleMood ?? "";
 
-      const existing = data.generation?.thumbnailPrompt;
-      const alreadyDone = typeof existing === "string" && existing.length > 0;
+    const existing = data.generation?.thumbnailPrompt;
+    const alreadyDone = typeof existing === "string" && existing.length > 0;
 
-      if (!alreadyDone) {
-        const anthropic = new Anthropic({ apiKey: anthropicKey.value() });
+    // Regenerate when forced (bypass idempotency); otherwise only on first run.
+    if (force || !alreadyDone) {
+      const anthropic = new Anthropic({ apiKey: anthropicKey.value() });
 
-        const parsed = await generateJson<Thumbnail>(
-          anthropic,
-          MODELS.thumbnail,
-          2000,
-          thumbnailPrompt.system,
-          thumbnailPrompt.buildUser({
-            storyBrief: blueprint.storyBrief,
-            logline: blueprint.logline,
-            cast: characters.map((c) => ({ name: c.name, role: c.role })),
-          }),
-          ThumbnailSchema,
-        );
+      const parsed = await generateJson<Thumbnail>(
+        anthropic,
+        MODELS.thumbnail,
+        2000,
+        thumbnailPrompt.system,
+        thumbnailPrompt.buildUser({
+          storyBrief: blueprint.storyBrief,
+          logline: blueprint.logline,
+          cast: characters.map((c) => ({ name: c.name, role: c.role })),
+        }),
+        ThumbnailSchema,
+      );
 
-        await jobRef.update({
-          "generation.thumbnailPrompt": assemble.thumbnailPrompt(
-            parsed,
-            characters,
-            styleMood,
-          ),
-          visualStatus: "metadata",
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      } else {
-        await jobRef.update({
-          visualStatus: "metadata",
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      }
+      const prompt = assemble.thumbnailPrompt(parsed, characters, styleMood);
+      // Keep the 3 most recent prompts, newest first; thumbnailPrompt = newest.
+      const variant: ThumbnailVariant = {
+        prompt,
+        featured: parsed.featured ?? [],
+        createdAt: Date.now(),
+      };
+      const variants = [variant, ...(data.generation?.thumbnailVariants ?? [])].slice(0, 3);
 
-      await getFunctions()
-        .taskQueue(GENERATE_METADATA_QUEUE)
-        .enqueue({ jobId });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Thumbnail generation failed.";
+      const update: Record<string, unknown> = {
+        "generation.thumbnailPrompt": prompt,
+        "generation.thumbnailVariants": variants,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      // Forced regenerate is thumbnail-only: clear any prior regen error, and do
+      // NOT advance the visual phase. Normal flow advances to metadata.
+      if (force) update.thumbnailError = FieldValue.delete();
+      else update.visualStatus = "metadata";
+      await jobRef.update(update);
+    } else {
+      await jobRef.update({
+        visualStatus: "metadata",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Only chain to metadata in the normal pipeline flow — a forced regenerate
+    // must NOT re-run metadata (or characters/scenes/hooks).
+    if (!force) {
+      await getFunctions().taskQueue(GENERATE_METADATA_QUEUE).enqueue({ jobId });
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Thumbnail generation failed.";
+    // A forced regenerate failure surfaces on its own field so it doesn't flip
+    // the whole visual phase (which is already 'done') to error.
+    if (force) {
+      await jobRef.set(
+        { thumbnailError: message, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    } else {
       await jobRef.set(
         {
           visualStatus: "error",
@@ -1134,6 +1169,34 @@ export const generateThumbnail = onTaskDispatched<{ jobId: string }>(
         { merge: true },
       );
     }
+  }
+});
+
+/**
+ * Re-roll ONLY the thumbnail on a finished story — no other visual pass runs.
+ * Fast (no Claude): enqueues generateThumbnail with force so it regenerates even
+ * though a thumbnail already exists. The new prompt (and the variants list) land
+ * on the job doc the client is already subscribed to.
+ */
+export const regenerateThumbnail = onCall<{ jobId: string }>(
+  { region: REGION },
+  async (request) => {
+    const { jobId } = request.data;
+    if (!jobId) {
+      throw new HttpsError("invalid-argument", "Missing jobId.");
+    }
+
+    const jobRef = db.collection("jobs").doc(jobId);
+    const snap = await jobRef.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Job not found.");
+    }
+
+    await getFunctions()
+      .taskQueue(GENERATE_THUMBNAIL_QUEUE)
+      .enqueue({ jobId, force: true });
+
+    return { ok: true };
   },
 );
 

@@ -150,6 +150,16 @@ export interface Hooks {
   shots: HookShot[];
 }
 
+/** One thumbnail prompt take, kept in a small history so alternatives compare. */
+export interface ThumbnailVariant {
+  /** Assembled, Camera-Realism thumbnail prompt. */
+  prompt: string;
+  /** Cast names featured in this take. */
+  featured: string[];
+  /** ms epoch when generated (plain number — not a Firestore serverTimestamp). */
+  createdAt: number;
+}
+
 /** Stage 5 deliverable. `scenes` is reserved for the future scene-splitter pass. */
 export interface Generation {
   title: string;
@@ -161,8 +171,10 @@ export interface Generation {
   characters: Character[];
   /** The cold open — a flowing monologue plus anchored backdrop shots. */
   hooks: Hooks;
-  /** Click-optimised prompt for the video thumbnail image. */
+  /** Click-optimised prompt for the video thumbnail image (the newest take). */
   thumbnailPrompt: string;
+  /** Recent thumbnail takes (newest first, capped at 3) for compare/re-roll. */
+  thumbnailVariants?: ThumbnailVariant[];
   /** Scenes split from the narration by the Phase 2 splitter pass. */
   scenes: Scene[];
   description?: string;
@@ -232,6 +244,8 @@ export interface Job {
   scenesBySegment?: Record<string, Scene[]>;
   /** The finished deliverable; the visual fields land here as they're produced. */
   generation?: Generation;
+  /** Error from a thumbnail-only re-roll (isolated from the visual-phase error). */
+  thumbnailError?: string;
   /** Lifecycle of the voice/TTS phase (an explicit step after status 'done'). */
   audioStatus?: AudioStatus;
   /**
