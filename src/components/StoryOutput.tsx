@@ -1,8 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AudioStatus, Generation, Scene, VisualStatus } from "@/lib/types";
+import type {
+  AudioStatus,
+  Character,
+  Generation,
+  ImageStatus,
+  Scene,
+  VisualStatus,
+} from "@/lib/types";
 import type { WriteProgress } from "@/lib/useGeneration";
+import { makeZip, downloadBlob, type ZipEntry } from "@/lib/zip";
+
+// Per-scene render cost at 1K, mirroring functions IMAGE_CONFIG.costPerImage.
+// Used only for the pre-run estimate; live spend comes from the doc.
+const SCENE_IMAGE_COST = 0.04;
 
 interface StoryOutputProps {
   generation: Generation;
@@ -15,11 +27,21 @@ interface StoryOutputProps {
   fullAudioUrl: string | null;
   audioProgress: WriteProgress | null;
   thumbnailError: string | null;
+  imageStatus: ImageStatus | null;
+  imageProgress: WriteProgress | null;
+  imageSpend: { images: number; usd: number } | null;
+  imageError: string | null;
   errorMessage: string | null;
   onGenerateVisuals: () => void;
   onRegenerateThumbnail: () => void;
   onGenerateAudio: () => void;
   onResumeAudio: () => void;
+  onGenerateImages: () => void;
+  onRegenerateSceneImage: (sceneIndex: number) => void;
+  onUploadCharacterReference: (
+    characterName: string,
+    imageBase64: string,
+  ) => Promise<void>;
   onRegenerate: () => void;
 }
 
@@ -178,11 +200,18 @@ export default function StoryOutput({
   fullAudioUrl,
   audioProgress,
   thumbnailError,
+  imageStatus,
+  imageProgress,
+  imageSpend,
+  imageError,
   errorMessage,
   onGenerateVisuals,
   onRegenerateThumbnail,
   onGenerateAudio,
   onResumeAudio,
+  onGenerateImages,
+  onRegenerateSceneImage,
+  onUploadCharacterReference,
   onRegenerate,
 }: StoryOutputProps) {
   const [tab, setTab] = useState<Tab>("script");
@@ -246,6 +275,12 @@ export default function StoryOutput({
   }
   const orphanScenes = uniqueScenes.filter((s) => !sceneToSegment.has(s.index));
   const hasInlineScenes = uniqueScenes.length > 0;
+
+  // Image phase. `imagesActive` = generation has been kicked off (so scene rows
+  // show their thumbnails and the groups default open); `idle`/null means the
+  // "Generate images" CTA is still the right thing to show.
+  const imagesActive = imageStatus != null && imageStatus !== "idle";
+  const scenesWithImages = uniqueScenes.filter((s) => s.imageUrl);
 
   const visualsStarted = visualStatus != null;
   const visualsDone = visualStatus === "done";
@@ -541,26 +576,14 @@ export default function StoryOutput({
                 </div>
                 <div className="mt-3 flex flex-col gap-3">
                   {characters.map((c, i) => (
-                    <div
+                    <CharacterCard
                       key={c.name}
-                      id={charAnchorId(c.name)}
-                      className="scroll-mt-28 rounded-md border border-line bg-surface/60 px-4 py-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium text-ink">{c.name}</div>
-                          {c.role && (
-                            <div className="text-xs text-muted">{c.role}</div>
-                          )}
-                        </div>
-                        <GhostButton onClick={() => copy(`char-${i}`, c.referencePrompt)}>
-                          {label(`char-${i}`, "Copy")}
-                        </GhostButton>
-                      </div>
-                      <p className="mt-2 font-mono text-xs leading-relaxed text-muted">
-                        {c.referencePrompt}
-                      </p>
-                    </div>
+                      character={c}
+                      anchorId={charAnchorId(c.name)}
+                      copyLabel={label(`char-${i}`, "Copy")}
+                      onCopy={() => copy(`char-${i}`, c.referencePrompt)}
+                      onUpload={onUploadCharacterReference}
+                    />
                   ))}
                 </div>
               </div>
@@ -575,7 +598,17 @@ export default function StoryOutput({
             "the scene image prompts",
             uniqueScenes.length > 0 ? (
               <div>
-                <div className="flex items-center justify-between gap-3">
+                <ImagePanel
+                  imageStatus={imageStatus}
+                  imageProgress={imageProgress}
+                  imageSpend={imageSpend}
+                  imageError={imageError}
+                  sceneCount={uniqueScenes.length}
+                  downloadable={scenesWithImages}
+                  storyTitle={generation.title}
+                  onGenerate={onGenerateImages}
+                />
+                <div className="mt-6 flex items-center justify-between gap-3">
                   <p className="text-xs text-faint">
                     Grouped by segment · Copy-all pastes the flat list for Whisk.
                   </p>
@@ -603,6 +636,8 @@ export default function StoryOutput({
                         scenes={grp}
                         knownNames={knownNames}
                         onJump={jumpToCharacter}
+                        imagesActive={imagesActive}
+                        onRegenerate={onRegenerateSceneImage}
                       />
                     );
                   })}
@@ -612,6 +647,8 @@ export default function StoryOutput({
                       scenes={orphanScenes}
                       knownNames={knownNames}
                       onJump={jumpToCharacter}
+                      imagesActive={imagesActive}
+                      onRegenerate={onRegenerateSceneImage}
                     />
                   )}
                 </div>
@@ -1014,13 +1051,20 @@ function SceneGroup({
   scenes,
   knownNames,
   onJump,
+  imagesActive,
+  onRegenerate,
 }: {
   segmentIndex: number | null;
   scenes: Scene[];
   knownNames: Set<string>;
   onJump: (name: string) => void;
+  imagesActive: boolean;
+  onRegenerate: (sceneIndex: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Once images are in play, default the group open so the grid is scannable
+  // without a click per segment; before that, stay collapsed (prompts only).
+  const [open, setOpen] = useState(imagesActive);
+  const rendered = scenes.filter((s) => s.imageUrl).length;
   return (
     <div className="rounded-md border border-line">
       <button
@@ -1033,29 +1077,467 @@ function SceneGroup({
           {segmentIndex != null ? `Segment ${segmentIndex + 1}` : "Unassigned"}
           <span className="ml-2 text-xs font-normal text-faint">
             · {scenes.length} scene{scenes.length === 1 ? "" : "s"}
+            {imagesActive ? ` · ${rendered}/${scenes.length} rendered` : ""}
           </span>
         </span>
         <Chevron open={open} />
       </button>
       {open && (
-        <ol className="flex flex-col gap-3 border-t border-line px-4 py-3 font-mono text-xs leading-relaxed">
+        <ol className="flex flex-col gap-4 border-t border-line px-4 py-3">
           {scenes.map((s) => (
-            <li key={s.index} className="text-muted">
-              <div className="mb-1 text-petrol">Scene {s.index + 1}</div>
-              <AttachRow
-                present={s.present}
-                knownNames={knownNames}
-                onJump={onJump}
-              />
-              {s.imagePrompt}
-              {s.motionPriority === "animate" && s.motion && (
-                <div className="mt-1 text-faint">Motion: {s.motion}</div>
-              )}
+            <li key={s.index}>
+              <div
+                className={
+                  imagesActive
+                    ? "flex flex-col gap-3 sm:flex-row"
+                    : "font-mono text-xs leading-relaxed text-muted"
+                }
+              >
+                {imagesActive && (
+                  <SceneThumb scene={s} onRegenerate={onRegenerate} />
+                )}
+                <div
+                  className={
+                    imagesActive
+                      ? "min-w-0 flex-1 font-mono text-xs leading-relaxed text-muted"
+                      : undefined
+                  }
+                >
+                  <div className="mb-1 text-petrol">Scene {s.index + 1}</div>
+                  <AttachRow
+                    present={s.present}
+                    knownNames={knownNames}
+                    onJump={onJump}
+                  />
+                  {s.imagePrompt}
+                  {s.motionPriority === "animate" && s.motion && (
+                    <div className="mt-1 text-faint">Motion: {s.motion}</div>
+                  )}
+                </div>
+              </div>
             </li>
           ))}
         </ol>
       )}
     </div>
+  );
+}
+
+/** Fetch an image URL as raw bytes (for zipping / single-file download). */
+async function fetchImageBytes(url: string): Promise<Uint8Array> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Image fetch failed (${res.status})`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/** Download one image URL under a real filename (blob, not a cross-origin <a>). */
+async function downloadImageUrl(url: string, filename: string): Promise<void> {
+  const bytes = await fetchImageBytes(url);
+  downloadBlob(new Blob([bytes as BlobPart], { type: "image/png" }), filename);
+}
+
+/** Read a File as a base64 data URL (what uploadCharacterReference accepts). */
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * The image-generation control block atop the Scenes tab: the kickoff CTA (with
+ * a pre-run cost estimate), live progress + spend once running, and a
+ * client-side "Download all" (zips every rendered scene).
+ */
+function ImagePanel({
+  imageStatus,
+  imageProgress,
+  imageSpend,
+  imageError,
+  sceneCount,
+  downloadable,
+  storyTitle,
+  onGenerate,
+}: {
+  imageStatus: ImageStatus | null;
+  imageProgress: WriteProgress | null;
+  imageSpend: { images: number; usd: number } | null;
+  imageError: string | null;
+  sceneCount: number;
+  downloadable: Scene[];
+  storyTitle: string;
+  onGenerate: () => void;
+}) {
+  const [zipping, setZipping] = useState(false);
+  const started = imageStatus != null && imageStatus !== "idle";
+  const spendLine =
+    imageSpend && imageSpend.images > 0
+      ? `${imageSpend.images} image${imageSpend.images === 1 ? "" : "s"} · $${imageSpend.usd.toFixed(2)}`
+      : null;
+
+  async function handleDownloadAll() {
+    if (zipping || downloadable.length === 0) return;
+    setZipping(true);
+    try {
+      const entries: ZipEntry[] = [];
+      for (const s of downloadable) {
+        if (!s.imageUrl) continue;
+        entries.push({
+          name: `scene-${String(s.index + 1).padStart(3, "0")}.png`,
+          data: await fetchImageBytes(s.imageUrl),
+        });
+      }
+      if (entries.length > 0) {
+        downloadBlob(makeZip(entries), `${slugify(storyTitle)}-scene-images.zip`);
+      }
+    } catch {
+      // Best-effort — a failed fetch just means no zip this time.
+    } finally {
+      setZipping(false);
+    }
+  }
+
+  const downloadAll =
+    downloadable.length > 0 ? (
+      <button
+        type="button"
+        onClick={handleDownloadAll}
+        disabled={zipping}
+        className="shrink-0 rounded-md border border-line px-2.5 py-1 font-mono text-[0.65rem] uppercase tracking-[0.15em] text-muted transition-colors hover:border-petrol/50 hover:text-petrol disabled:opacity-50"
+      >
+        {zipping ? "Zipping…" : `Download all · ${downloadable.length}`}
+      </button>
+    ) : null;
+
+  // Pre-run: the CTA with a cost estimate.
+  if (!started) {
+    const estimate = (sceneCount * SCENE_IMAGE_COST).toFixed(2);
+    return (
+      <div className="flex flex-col items-start gap-3 rounded-md border border-line bg-surface/60 px-4 py-4">
+        <p className="text-sm leading-relaxed text-muted">
+          Generate a still for every scene — character references first, then one
+          face-consistent image per scene, with blocked scenes flagged for a
+          manual fix.
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onGenerate}
+            className="rounded-md bg-petrol px-5 py-2.5 text-sm font-medium text-canvas transition-colors hover:bg-petrol-bright"
+          >
+            Generate images
+          </button>
+          <span className="font-mono text-xs text-faint">
+            ~{sceneCount} scenes × ${SCENE_IMAGE_COST.toFixed(2)} ≈ ${estimate}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const isError = imageStatus === "error";
+  const isDone = imageStatus === "done";
+  const running = !isError && !isDone;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-line bg-surface/60 px-4 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {running && (
+            <span
+              className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line border-t-petrol"
+              aria-hidden
+            />
+          )}
+          <span className="text-sm font-medium text-ink">
+            {imageStatus === "references"
+              ? "Generating character references…"
+              : imageStatus === "scenes"
+                ? imageProgress
+                  ? `Rendering scenes · ${imageProgress.current}/${imageProgress.total}`
+                  : "Rendering scenes…"
+                : isDone
+                  ? "Images complete"
+                  : "Image generation stopped"}
+          </span>
+        </div>
+        {downloadAll}
+      </div>
+
+      {imageStatus === "scenes" && imageProgress && imageProgress.total > 0 && (
+        <div className="h-1.5 overflow-hidden rounded-full bg-line">
+          <div
+            className="h-full rounded-full bg-petrol transition-[width]"
+            style={{
+              width: `${Math.round((imageProgress.current / imageProgress.total) * 100)}%`,
+            }}
+          />
+        </div>
+      )}
+
+      {spendLine && (
+        <div className="font-mono text-xs tabular-nums text-faint">{spendLine}</div>
+      )}
+
+      {isError && (
+        <p className="text-sm leading-relaxed text-muted">
+          {imageError ?? "The image phase hit a problem."}{" "}
+          <button
+            type="button"
+            onClick={onGenerate}
+            className="font-medium text-petrol hover:text-petrol-bright"
+          >
+            Retry
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One scene's rendered still (or its blocked/error/pending state) + controls. */
+function SceneThumb({
+  scene,
+  onRegenerate,
+}: {
+  scene: Scene;
+  onRegenerate: (sceneIndex: number) => void;
+}) {
+  const regenerating = scene.imageRegenerating === true;
+  const variants = scene.imageVariants ?? [];
+
+  async function handleDownload() {
+    if (!scene.imageUrl) return;
+    try {
+      await downloadImageUrl(
+        scene.imageUrl,
+        `scene-${String(scene.index + 1).padStart(3, "0")}.png`,
+      );
+    } catch {
+      // Best-effort download.
+    }
+  }
+
+  return (
+    <div className="w-full shrink-0 sm:w-52">
+      <div className="relative aspect-video overflow-hidden rounded-md border border-line bg-surface">
+        {scene.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={scene.imageUrl}
+            alt={`Scene ${scene.index + 1}`}
+            className="h-full w-full object-cover"
+          />
+        ) : scene.imageState === "blocked" ? (
+          <ThumbBadge tone="warn" label="Blocked" hint="Fix in Whisk" />
+        ) : scene.imageState === "error" ? (
+          <ThumbBadge tone="error" label="Failed" hint="Retry or fix" />
+        ) : (
+          <ThumbBadge tone="pending" label={regenerating ? "" : "Queued"} />
+        )}
+        {regenerating && (
+          <div className="absolute inset-0 flex items-center justify-center bg-canvas/60">
+            <span
+              className="h-5 w-5 animate-spin rounded-full border-2 border-line border-t-petrol"
+              aria-hidden
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <MiniButton onClick={() => onRegenerate(scene.index)} disabled={regenerating}>
+          {regenerating ? "Regenerating…" : "Regenerate"}
+        </MiniButton>
+        {scene.imageUrl && !regenerating && (
+          <MiniButton onClick={handleDownload}>Download</MiniButton>
+        )}
+      </div>
+
+      {scene.imageRegenError && (
+        <p className="mt-1 text-[0.7rem] leading-snug text-red-700">
+          Re-roll failed: {scene.imageRegenError}
+        </p>
+      )}
+
+      {variants.length > 0 && (
+        <div className="mt-2">
+          <div className="mb-1 font-mono text-[0.55rem] uppercase tracking-[0.15em] text-faint">
+            Previous · {variants.length}
+          </div>
+          <div className="flex gap-1.5">
+            {variants.map((v) => (
+              <a
+                key={v.createdAt}
+                href={v.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open previous take"
+                className="block h-10 w-16 shrink-0 overflow-hidden rounded border border-line"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={v.url}
+                  alt="Previous take"
+                  className="h-full w-full object-cover"
+                />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThumbBadge({
+  tone,
+  label,
+  hint,
+}: {
+  tone: "warn" | "error" | "pending";
+  label: string;
+  hint?: string;
+}) {
+  const color =
+    tone === "warn"
+      ? "text-amber-600"
+      : tone === "error"
+        ? "text-red-700"
+        : "text-faint";
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 px-2 text-center">
+      {label && (
+        <span
+          className={`font-mono text-[0.6rem] uppercase tracking-[0.2em] ${color}`}
+        >
+          {label}
+        </span>
+      )}
+      {hint && <span className="text-[0.65rem] text-faint">{hint}</span>}
+    </div>
+  );
+}
+
+/** A character reference card: prompt, its rendered reference, and upload-my-own. */
+function CharacterCard({
+  character,
+  anchorId,
+  copyLabel,
+  onCopy,
+  onUpload,
+}: {
+  character: Character;
+  anchorId: string;
+  copyLabel: string;
+  onCopy: () => void;
+  onUpload: (characterName: string, imageBase64: string) => Promise<void>;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked after a failure
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const dataUrl = await readAsDataUrl(file);
+      await onUpload(character.name, dataUrl);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div
+      id={anchorId}
+      className="scroll-mt-28 rounded-md border border-line bg-surface/60 px-4 py-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-ink">{character.name}</div>
+          {character.role && (
+            <div className="text-xs text-muted">{character.role}</div>
+          )}
+        </div>
+        <GhostButton onClick={onCopy}>{copyLabel}</GhostButton>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+        <div className="w-full shrink-0 sm:w-40">
+          <div className="aspect-square overflow-hidden rounded-md border border-line bg-surface">
+            {character.referenceImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={character.referenceImageUrl}
+                alt={`${character.name} reference`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center px-2 text-center text-[0.65rem] text-faint">
+                No reference yet
+              </div>
+            )}
+          </div>
+          <div className="mt-1.5">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleFile}
+              className="hidden"
+            />
+            <MiniButton
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading
+                ? "Uploading…"
+                : character.referenceImageUrl
+                  ? "Replace"
+                  : "Upload my own"}
+            </MiniButton>
+          </div>
+          {uploadError && (
+            <p className="mt-1 text-[0.7rem] leading-snug text-red-700">
+              {uploadError}
+            </p>
+          )}
+        </div>
+
+        <p className="min-w-0 flex-1 font-mono text-xs leading-relaxed text-muted">
+          {character.referencePrompt}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MiniButton({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[0.6rem] uppercase tracking-[0.12em] text-muted transition-colors hover:border-petrol/50 hover:text-petrol disabled:opacity-50 disabled:hover:border-line disabled:hover:text-muted"
+    >
+      {children}
+    </button>
   );
 }
 

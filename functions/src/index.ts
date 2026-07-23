@@ -68,8 +68,31 @@ import {
   CHUNK_TARGET_SECONDS,
 } from "./lib/voice";
 import { pcmToWav, concatWav, uploadAudio, uploadWav } from "./lib/audio";
+import {
+  IMAGE_CONFIG,
+  MAX_REFERENCE_IMAGES,
+  costOf,
+  type ImageResolution,
+} from "./lib/imageConfig";
+import {
+  generateImage,
+  type ImageResult,
+  type ReferenceImage,
+} from "./lib/imageGen";
+import {
+  uploadImage,
+  downloadImage,
+  sniffImageType,
+} from "./lib/imageStore";
 
-setGlobalOptions({ maxInstances: 10 });
+// Every pipeline pass is a SEQUENTIAL task chain — each handler enqueues the
+// next index rather than fanning out — so per-function concurrency beyond a
+// couple of instances is capacity that is reserved but never used. Cloud Run
+// bills the region's "total allowable CPU" quota against maxInstances across all
+// functions, and at 10 apiece that ceiling blocked new deploys outright. Three
+// leaves room for a few concurrent jobs while keeping the whole project well
+// under the cap.
+setGlobalOptions({ maxInstances: 3 });
 
 initializeApp();
 const db = getFirestore();
@@ -235,6 +258,9 @@ const PREPARE_AUDIO_QUEUE = `locations/${REGION}/functions/prepareAudio`;
 const SYNTH_SEGMENT_QUEUE = `locations/${REGION}/functions/synthSegment`;
 const SYNTH_HOOK_QUEUE = `locations/${REGION}/functions/synthHook`;
 const STITCH_AUDIO_QUEUE = `locations/${REGION}/functions/stitchAudio`;
+// Image wave queues.
+const GENERATE_REFERENCES_QUEUE = `locations/${REGION}/functions/generateReferences`;
+const GENERATE_SCENE_IMAGE_QUEUE = `locations/${REGION}/functions/generateSceneImage`;
 
 /**
  * Create a job and return fast. The heavy Claude work happens in onJobCreated,
@@ -2021,3 +2047,721 @@ export const synthTest = onCall<{ text: string; mode: "narration" | "hook" }>(
   },
 );
 
+
+// ── Image wave ──────────────────────────────────────────────────────────────
+// Character references first, then one still per scene with those references
+// attached as subjects. Explicitly user-triggered: this is the pipeline's most
+// expensive pass, so nothing here ever starts on its own.
+
+/**
+ * A stable, filesystem-safe file stem for a character's reference image. The
+ * index is appended so two characters that slugify identically (or a name that
+ * is entirely punctuation) still get distinct, deterministic paths — the same
+ * character always overwrites its own object rather than accumulating orphans.
+ */
+function slugForFile(name: string, index: number): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return slug ? `${slug}-${index}` : `${index}`;
+}
+
+/** The shape of a character as stored on generation.characters. */
+interface StoredCharacter {
+  name: string;
+  referencePrompt?: string;
+  referenceImageUrl?: string;
+}
+
+/**
+ * Generate one image, retrying only when retrying can help. An ERROR is
+ * transient (network/empty response) so it gets another attempt; a BLOCKED is a
+ * policy verdict on this exact text, and re-sending identical text only blocks
+ * again — so it returns immediately rather than burning the budget.
+ */
+async function generateImageWithRetry(
+  ai: GoogleGenAI,
+  prompt: string,
+  resolution: ImageResolution,
+  label: string,
+  referenceImages?: ReferenceImage[],
+): Promise<ImageResult> {
+  let last: ImageResult = { ok: false, kind: "error", reason: "not attempted" };
+  for (let attempt = 1; attempt <= IMAGE_CONFIG.maxAttemptsPerImage; attempt++) {
+    last = await generateImage({ ai, prompt, referenceImages, resolution });
+    if (last.ok) return last;
+    if (last.kind === "blocked") {
+      console.warn(`Image BLOCKED (${label}): ${last.reason}`);
+      return last;
+    }
+    console.warn(
+      `Image error (${label}, attempt ${attempt}/${IMAGE_CONFIG.maxAttemptsPerImage}): ${last.reason}`,
+    );
+  }
+  return last;
+}
+
+/**
+ * Record one character's finished reference and the spend it cost, atomically.
+ *
+ * generation.characters is an ARRAY, and Firestore cannot address an array
+ * element by field path — so the array is read, the one entry is set by index,
+ * and the whole array is written back inside a transaction. That keeps the write
+ * deterministic (never an append, same lesson as the segment duplicate bug) and
+ * safe against a concurrent uploadCharacterReference touching a different index.
+ */
+async function recordCharacterReference(
+  jobRef: FirebaseFirestore.DocumentReference,
+  index: number,
+  url: string,
+  costUsd: number,
+): Promise<void> {
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef);
+    const data = snap.data() as
+      | {
+          generation?: { characters?: StoredCharacter[] };
+          imageSpend?: { images: number; usd: number };
+        }
+      | undefined;
+    const characters = data?.generation?.characters;
+    if (!Array.isArray(characters) || !characters[index]) return;
+
+    const next = characters.slice();
+    next[index] = { ...next[index], referenceImageUrl: url };
+
+    const spend = data?.imageSpend ?? { images: 0, usd: 0 };
+    tx.update(jobRef, {
+      "generation.characters": next,
+      imageSpend: {
+        images: spend.images + (costUsd > 0 ? 1 : 0),
+        // Keep cents clean — floating-point sums drift over ~100 images.
+        usd: Math.round((spend.usd + costUsd) * 1000) / 1000,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+/**
+ * Kick off the image wave on a story whose visuals are finished. Fast (no model
+ * calls): flips the job into the image lifecycle and hands off to the reference
+ * pass. Requires generation.scenes — the scene prompts are what gets rendered.
+ */
+export const generateImages = onCall<{ jobId: string }>(
+  { region: REGION },
+  async (request) => {
+    const { jobId } = request.data;
+    if (!jobId) {
+      throw new HttpsError("invalid-argument", "Missing jobId.");
+    }
+
+    const jobRef = db.collection("jobs").doc(jobId);
+    const snap = await jobRef.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Job not found.");
+    }
+
+    const data = snap.data() as {
+      generation?: { scenes?: unknown[] };
+    };
+    const scenes = data.generation?.scenes;
+    if (!Array.isArray(scenes) || scenes.length === 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "This story has no scenes yet — run the visuals pass first.",
+      );
+    }
+
+    await jobRef.update({
+      imageStatus: "references",
+      imageProgress: { current: 0, total: scenes.length },
+      imageSpend: { images: 0, usd: 0 },
+      imageError: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    await getFunctions().taskQueue(GENERATE_REFERENCES_QUEUE).enqueue({ jobId });
+
+    return { ok: true };
+  },
+);
+
+/**
+ * Render one reference portrait per character, then hand off to the scene pass.
+ *
+ * Idempotent by construction: any character that ALREADY has a
+ * referenceImageUrl is skipped. That single rule is also the upload mechanism —
+ * a reference uploaded via uploadCharacterReference is simply already set, so
+ * generation leaves it alone and the hand-made image is what every scene gets.
+ *
+ * References are hero images (2K): there are only a handful per story, and every
+ * scene's face consistency is conditioned on them, so they are worth the crispness.
+ */
+export const generateReferences = onTaskDispatched<{ jobId: string }>(
+  {
+    region: REGION,
+    secrets: [geminiKey],
+    timeoutSeconds: 300,
+    memory: "512MiB",
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 5 },
+  },
+  async (req) => {
+    const { jobId } = req.data;
+    const jobRef = db.collection("jobs").doc(jobId);
+
+    try {
+      const snap = await jobRef.get();
+      if (!snap.exists) return;
+
+      const data = snap.data() as {
+        generation?: { characters?: StoredCharacter[] };
+      };
+      const characters = data.generation?.characters ?? [];
+
+      const ai = new GoogleGenAI({ apiKey: geminiKey.value() });
+      const resolution = IMAGE_CONFIG.heroResolution;
+      const cost = costOf(resolution);
+      let blocked = 0;
+      let failed = 0;
+
+      for (let i = 0; i < characters.length; i++) {
+        const character = characters[i];
+        // Already has one (generated earlier, or uploaded by hand) — leave it.
+        if (character.referenceImageUrl) continue;
+        if (!character.referencePrompt) {
+          console.warn(`No referencePrompt for character ${i} — skipping.`);
+          continue;
+        }
+
+        const result = await generateImageWithRetry(
+          ai,
+          character.referencePrompt,
+          resolution,
+          `reference ${character.name}`,
+          undefined,
+        );
+
+        if (!result.ok) {
+          if (result.kind === "blocked") blocked++;
+          else failed++;
+          // A missing reference is survivable: scenes still render, just without
+          // this character's face locked. Carry on rather than stalling the run.
+          continue;
+        }
+
+        const url = await uploadImage(
+          jobId,
+          `ref-${slugForFile(character.name, i)}`,
+          result.buffer,
+        );
+        await recordCharacterReference(jobRef, i, url, cost);
+      }
+
+      if (blocked || failed) {
+        console.warn(
+          `References finished with ${blocked} blocked, ${failed} failed ` +
+            `(of ${characters.length} characters).`,
+        );
+      }
+
+      await jobRef.update({
+        imageStatus: "scenes",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      await getFunctions()
+        .taskQueue(GENERATE_SCENE_IMAGE_QUEUE)
+        .enqueue({ jobId, sceneIndex: 0 });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Reference generation failed.";
+      await jobRef.set(
+        {
+          imageStatus: "error",
+          imageError: message,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+  },
+);
+
+/**
+ * Attach a hand-made reference image (e.g. rendered in Whisk) to a character.
+ *
+ * Takes the image inline as base64 rather than handing back a signed upload URL:
+ * signing needs a service account with token-creator rights, whereas the Admin
+ * SDK can already write the bytes directly — and reference portraits are small
+ * enough to fit a callable payload.
+ *
+ * Run this BEFORE generateImages and the uploaded image wins, because
+ * generateReferences skips any character that already has one.
+ */
+export const uploadCharacterReference = onCall<{
+  jobId: string;
+  characterName: string;
+  imageBase64: string;
+}>(
+  { region: REGION, memory: "512MiB" },
+  async (request) => {
+    const { jobId, characterName, imageBase64 } = request.data;
+    if (!jobId || !characterName || !imageBase64) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Provide jobId, characterName and imageBase64.",
+      );
+    }
+
+    const jobRef = db.collection("jobs").doc(jobId);
+    const snap = await jobRef.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Job not found.");
+    }
+
+    const data = snap.data() as {
+      generation?: { characters?: StoredCharacter[] };
+    };
+    const characters = data.generation?.characters ?? [];
+    const index = characters.findIndex((c) => c.name === characterName);
+    if (index === -1) {
+      throw new HttpsError(
+        "not-found",
+        `No character named "${characterName}" on this job.`,
+      );
+    }
+
+    // Accept a bare base64 string or a full data: URL from a file input.
+    const base64 = imageBase64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(base64, "base64");
+    if (buffer.length === 0) {
+      throw new HttpsError("invalid-argument", "Image data is empty.");
+    }
+    // Trust the bytes, not a client-declared type.
+    const contentType = sniffImageType(buffer);
+    if (!contentType) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Unsupported image — use PNG, JPEG or WebP.",
+      );
+    }
+
+    const url = await uploadImage(
+      jobId,
+      `ref-${slugForFile(characterName, index)}`,
+      buffer,
+      contentType,
+    );
+    // Uploading costs nothing, so this records the URL without touching spend.
+    await recordCharacterReference(jobRef, index, url, 0);
+
+    return { ok: true, url };
+  },
+);
+
+/** The shape of a scene as stored on generation.scenes. */
+interface StoredScene {
+  index: number;
+  imagePrompt?: string;
+  present?: string[];
+  imageUrl?: string;
+  imageState?: "ok" | "blocked" | "error";
+  /** Previous takes from re-rolls, newest first, capped at 3. */
+  imageVariants?: { url: string; createdAt: number }[];
+  /** True while a forced re-roll is in flight (doc-derived UI loading state). */
+  imageRegenerating?: boolean;
+  /** Isolated failure of a re-roll — never the job-level imageError. */
+  imageRegenError?: string;
+}
+
+const MAX_IMAGE_VARIANTS = 3;
+
+/**
+ * Commit one scene's outcome: the scene fields, the spend it cost, the progress
+ * tick, and — on the last scene — the terminal status, all in one transaction.
+ *
+ * generation.scenes is an ARRAY, so the same rule as characters applies: read,
+ * set by index, write the whole array back. Never arrayUnion, never push — a
+ * Cloud Tasks retry must overwrite scene N, not append a second copy of it.
+ */
+/**
+ * Count one generated image against the budget, immediately.
+ *
+ * Deliberately separate from writing the image URL: an image that generated but
+ * then failed to upload has still been PAID FOR, and the task retry will
+ * generate it again. Recording spend at generation time (not at upload time)
+ * keeps the cap honest — undercounting is the one direction the guardrail must
+ * never fail in.
+ */
+async function recordImageSpend(
+  jobRef: FirebaseFirestore.DocumentReference,
+  costUsd: number,
+): Promise<void> {
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef);
+    const spend = (snap.data() as { imageSpend?: { images: number; usd: number } })
+      ?.imageSpend ?? { images: 0, usd: 0 };
+    tx.update(jobRef, {
+      imageSpend: {
+        images: spend.images + 1,
+        usd: Math.round((spend.usd + costUsd) * 1000) / 1000,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+async function recordSceneOutcome(
+  jobRef: FirebaseFirestore.DocumentReference,
+  sceneIndex: number,
+  patch: Partial<StoredScene>,
+  costUsd: number,
+  options: { advanceProgress: boolean; finish: boolean; force?: boolean },
+): Promise<void> {
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef);
+    const data = snap.data() as
+      | {
+          generation?: { scenes?: StoredScene[] };
+          imageSpend?: { images: number; usd: number };
+          imageProgress?: { current: number; total: number };
+        }
+      | undefined;
+    const scenes = data?.generation?.scenes;
+    if (!Array.isArray(scenes) || !scenes[sceneIndex]) return;
+
+    const prev = scenes[sceneIndex];
+    const next = scenes.slice();
+    const merged: StoredScene = { ...prev, ...patch };
+
+    if (options.force) {
+      // A successful re-roll: keep the previous take before overwriting it. The
+      // old object lives on at a versioned path (see the upload call), so its
+      // URL stays valid as a comparison thumbnail. Newest first, capped.
+      if (prev.imageUrl && patch.imageUrl && patch.imageUrl !== prev.imageUrl) {
+        merged.imageVariants = [
+          { url: prev.imageUrl, createdAt: Date.now() },
+          ...(prev.imageVariants ?? []),
+        ].slice(0, MAX_IMAGE_VARIANTS);
+      }
+      // The re-roll is done: drop the in-flight flag and any stale error.
+      merged.imageRegenerating = false;
+      delete merged.imageRegenError;
+    }
+    next[sceneIndex] = merged;
+
+    const spend = data?.imageSpend ?? { images: 0, usd: 0 };
+    const progress = data?.imageProgress ?? { current: 0, total: scenes.length };
+
+    const update: Record<string, unknown> = {
+      "generation.scenes": next,
+      imageSpend: {
+        images: spend.images + (costUsd > 0 ? 1 : 0),
+        // Keep cents clean — floating-point sums drift over ~100 images.
+        usd: Math.round((spend.usd + costUsd) * 1000) / 1000,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (options.advanceProgress) {
+      // Monotonic: a re-run of an earlier scene must never rewind the bar.
+      update.imageProgress = {
+        current: Math.max(progress.current, sceneIndex + 1),
+        total: progress.total,
+      };
+    }
+    if (options.finish) update.imageStatus = "done";
+
+    tx.update(jobRef, update);
+  });
+}
+
+/**
+ * A forced re-roll that failed (blocked or error). Record it on an ISOLATED
+ * scene field and — crucially — leave the existing imageUrl/imageState intact:
+ * a re-roll that doesn't pan out must never destroy the good image it was trying
+ * to improve on. No spend is recorded; a call that returned no image isn't
+ * billed. Clears the in-flight flag so the button stops spinning.
+ */
+async function recordForceFailure(
+  jobRef: FirebaseFirestore.DocumentReference,
+  sceneIndex: number,
+  reason: string,
+): Promise<void> {
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef);
+    const scenes = (
+      snap.data() as { generation?: { scenes?: StoredScene[] } } | undefined
+    )?.generation?.scenes;
+    if (!Array.isArray(scenes) || !scenes[sceneIndex]) return;
+
+    const next = scenes.slice();
+    next[sceneIndex] = {
+      ...next[sceneIndex],
+      imageRegenerating: false,
+      imageRegenError: reason,
+    };
+    tx.update(jobRef, {
+      "generation.scenes": next,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+/**
+ * Render ONE scene still, then chain to the next. This is the pass that spends
+ * real money (~$0.04/scene at 1K, ~$2.80 for a 70-scene video), so the
+ * guardrails come first and are absolute:
+ *
+ *  - the budget cap is checked BEFORE any call and stops the chain dead;
+ *  - an existing image is never regenerated unless a user explicitly asked
+ *    (`force`), so retries and re-triggers cost nothing;
+ *  - a BLOCKED scene is never retried — identical text blocks identically, and
+ *    re-sending it only burns budget for the same refusal.
+ *
+ * Failures mark the scene and CONTINUE: one bad scene out of seventy should not
+ * abandon the other sixty-nine. Blocked/error scenes surface as explicit states
+ * so the few needing a hand-fix in Whisk are visible rather than silently absent.
+ */
+export const generateSceneImage = onTaskDispatched<{
+  jobId: string;
+  sceneIndex: number;
+  force?: boolean;
+}>(
+  {
+    region: REGION,
+    secrets: [geminiKey],
+    timeoutSeconds: 300,
+    memory: "512MiB",
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 5 },
+  },
+  async (req) => {
+    const { jobId, sceneIndex, force } = req.data;
+    const jobRef = db.collection("jobs").doc(jobId);
+
+    try {
+      const snap = await jobRef.get();
+      if (!snap.exists) return;
+
+      const data = snap.data() as {
+        generation?: {
+          scenes?: StoredScene[];
+          characters?: StoredCharacter[];
+        };
+        imageSpend?: { images: number; usd: number };
+        imageProgress?: { current: number; total: number };
+      };
+
+      const scenes = data.generation?.scenes ?? [];
+      const scene = scenes[sceneIndex];
+      if (!scene) return; // Past the end — the chain is already finished.
+
+      const isLast = sceneIndex >= scenes.length - 1;
+      // A forced re-roll is a single explicit scene, not a chain restart.
+      const chains = !force;
+
+      // ── BUDGET GUARD — before anything that could spend ──────────────────
+      const spent = data.imageSpend?.images ?? 0;
+      if (spent >= IMAGE_CONFIG.maxImagesPerJob) {
+        console.error(
+          `Budget cap reached for job ${jobId}: ${spent}/${IMAGE_CONFIG.maxImagesPerJob} images.`,
+        );
+        const capMessage =
+          `Budget cap reached — ${spent} images generated ` +
+          `(limit ${IMAGE_CONFIG.maxImagesPerJob}).`;
+        if (force) {
+          // A user re-roll: keep it isolated. Don't flip the whole job to error
+          // (it may be legitimately 'done') — just refuse this one scene.
+          await recordForceFailure(jobRef, sceneIndex, capMessage);
+        } else {
+          await jobRef.update({
+            imageStatus: "error",
+            imageError:
+              `${capMessage} Stopped at scene ${sceneIndex + 1} ` +
+              `of ${scenes.length} to avoid further spend.`,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        return; // Never exceed the cap.
+      }
+
+      // ── Idempotency — never auto-regenerate an existing image ────────────
+      if (scene.imageUrl && !force) {
+        if (chains) {
+          // Keep the bar moving while a resumed run scans past work already
+          // done, instead of freezing until it reaches the first new scene.
+          const current = data.imageProgress?.current ?? 0;
+          await jobRef.update({
+            imageProgress: {
+              current: Math.max(current, sceneIndex + 1),
+              total: data.imageProgress?.total ?? scenes.length,
+            },
+            ...(isLast ? { imageStatus: "done" } : {}),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          if (!isLast) {
+            await getFunctions()
+              .taskQueue(GENERATE_SCENE_IMAGE_QUEUE)
+              .enqueue({ jobId, sceneIndex: sceneIndex + 1 });
+          }
+        }
+        return;
+      }
+
+      if (!scene.imagePrompt) {
+        console.warn(`Scene ${sceneIndex} has no imagePrompt — marking error.`);
+        if (force) {
+          await recordForceFailure(jobRef, sceneIndex, "Scene has no image prompt.");
+        } else {
+          await recordSceneOutcome(
+            jobRef,
+            sceneIndex,
+            { imageState: "error" },
+            0,
+            { advanceProgress: chains, finish: chains && isLast },
+          );
+        }
+      } else {
+        // ── References: the faces this scene must keep consistent ──────────
+        // Only characters actually present, only those with a reference, and at
+        // most MAX_REFERENCE_IMAGES — sliced BEFORE fetching so we never
+        // download bytes the call would discard.
+        const characters = data.generation?.characters ?? [];
+        const referenceImages: ReferenceImage[] = [];
+        const wanted = (scene.present ?? [])
+          .map((name) => characters.find((c) => c.name === name))
+          .filter((c): c is StoredCharacter => Boolean(c?.referenceImageUrl))
+          .slice(0, MAX_REFERENCE_IMAGES);
+
+        for (const character of wanted) {
+          const image = await downloadImage(character.referenceImageUrl as string);
+          if (image) {
+            referenceImages.push({ ...image, name: character.name });
+          }
+        }
+
+        const resolution = IMAGE_CONFIG.sceneResolution;
+        const ai = new GoogleGenAI({ apiKey: geminiKey.value() });
+        const result = await generateImageWithRetry(
+          ai,
+          scene.imagePrompt,
+          resolution,
+          `scene ${sceneIndex + 1}/${scenes.length}`,
+          referenceImages,
+        );
+
+        if (result.ok) {
+          // Bill first: the image exists and is paid for whether or not the
+          // upload below succeeds.
+          await recordImageSpend(jobRef, costOf(resolution));
+          // The chain writes a deterministic path (retries overwrite in place).
+          // A forced re-roll writes a VERSIONED path so the previous take's
+          // object — and its download URL — survives as a comparison variant.
+          const name = force
+            ? `scene-${String(sceneIndex).padStart(3, "0")}-${Date.now()}`
+            : `scene-${String(sceneIndex).padStart(3, "0")}`;
+          const url = await uploadImage(jobId, name, result.buffer);
+          await recordSceneOutcome(
+            jobRef,
+            sceneIndex,
+            { imageUrl: url, imageState: "ok" },
+            0,
+            { advanceProgress: chains, finish: chains && isLast, force },
+          );
+        } else if (force) {
+          // A failed re-roll must not clobber the good image it was replacing —
+          // record it on the isolated field and leave imageUrl untouched.
+          await recordForceFailure(jobRef, sceneIndex, result.reason);
+        } else {
+          // Blocked or exhausted-retry error: mark it and keep going. No spend
+          // is recorded — a call that returned no image isn't billed as one.
+          await recordSceneOutcome(
+            jobRef,
+            sceneIndex,
+            { imageState: result.kind },
+            0,
+            { advanceProgress: chains, finish: chains && isLast },
+          );
+        }
+      }
+
+      // ── Advance the chain ────────────────────────────────────────────────
+      if (chains && !isLast) {
+        await getFunctions()
+          .taskQueue(GENERATE_SCENE_IMAGE_QUEUE)
+          .enqueue({ jobId, sceneIndex: sceneIndex + 1 });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Scene image generation failed.";
+      // A re-roll's failure stays isolated to its scene; only a chain failure
+      // flips the whole job to error.
+      if (force) {
+        await recordForceFailure(jobRef, sceneIndex, message).catch(() => {});
+      } else {
+        await jobRef.set(
+          {
+            imageStatus: "error",
+            imageError: message,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+    }
+  },
+);
+
+/**
+ * Re-roll ONE scene's image on explicit user request. Marks the scene
+ * in-flight (a doc-derived loading state — no local spinner needed), then
+ * enqueues generateSceneImage with force:true for that scene ALONE. Because
+ * force short-circuits chain continuation, this never touches other scenes; the
+ * previous take is preserved as a variant by the generation path.
+ */
+export const regenerateSceneImage = onCall<{
+  jobId: string;
+  sceneIndex: number;
+}>(
+  { region: REGION },
+  async (request) => {
+    const { jobId, sceneIndex } = request.data;
+    if (!jobId || typeof sceneIndex !== "number" || sceneIndex < 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Provide jobId and a valid sceneIndex.",
+      );
+    }
+
+    const jobRef = db.collection("jobs").doc(jobId);
+
+    // Flag the scene as regenerating and clear any stale re-roll error, keyed
+    // deterministically by index (read-modify-write the whole array — Firestore
+    // can't address an array element, and a push would duplicate the scene).
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(jobRef);
+      if (!snap.exists) throw new HttpsError("not-found", "Job not found.");
+      const scenes = (
+        snap.data() as { generation?: { scenes?: StoredScene[] } }
+      ).generation?.scenes;
+      if (!Array.isArray(scenes) || !scenes[sceneIndex]) {
+        throw new HttpsError("not-found", "Scene not found.");
+      }
+      const next = scenes.slice();
+      const { imageRegenError: _drop, ...rest } = next[sceneIndex];
+      next[sceneIndex] = { ...rest, imageRegenerating: true };
+      tx.update(jobRef, {
+        "generation.scenes": next,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    await getFunctions()
+      .taskQueue(GENERATE_SCENE_IMAGE_QUEUE)
+      .enqueue({ jobId, sceneIndex, force: true });
+
+    return { ok: true };
+  },
+);

@@ -5,27 +5,10 @@
 // encoding lib needed): WAV stitches cleanly and imports into any editor.
 // Every segment stays mono at the same sample rate so concatenation is
 // seamless (mismatched rates cause clicks/glitches at the seams).
-import { randomUUID } from "node:crypto";
-import { getStorage } from "firebase-admin/storage";
+import { uploadBuffer } from "./storage";
 
 const NUM_CHANNELS = 1;
 const BITS_PER_SAMPLE = 16;
-
-/**
- * The project's default Storage bucket. In the functions runtime,
- * getStorage().bucket() defaults to the legacy `<project>.appspot.com` name,
- * which newer projects never provision — the real default bucket is
- * `<project>.firebasestorage.app`. Resolve it explicitly (STORAGE_BUCKET env
- * override wins), so uploads land in the bucket that actually exists.
- */
-function defaultBucketName(): string {
-  if (process.env.STORAGE_BUCKET) return process.env.STORAGE_BUCKET;
-  const projectId =
-    JSON.parse(process.env.FIREBASE_CONFIG ?? "{}").projectId ??
-    process.env.GCLOUD_PROJECT ??
-    process.env.GCP_PROJECT;
-  return `${projectId}.firebasestorage.app`;
-}
 const WAV_HEADER_BYTES = 44;
 
 /** Prepend a canonical 44-byte PCM/WAV header to raw 16-bit mono PCM. */
@@ -89,29 +72,12 @@ export function concatWav(wavBuffers: Buffer[]): Buffer {
   return pcmToWav(pcm, sampleRate);
 }
 
-/**
- * Save a WAV at an exact Storage path and return a long-lived, login-less
- * download URL. We attach a Firebase download token so the URL never expires (no
- * signing credentials or public-ACL dependency).
- */
+/** Save a WAV at an exact Storage path → long-lived, login-less download URL. */
 export async function uploadWav(
   path: string,
   wavBuffer: Buffer,
 ): Promise<string> {
-  const bucket = getStorage().bucket(defaultBucketName());
-  const file = bucket.file(path);
-  const token = randomUUID();
-
-  await file.save(wavBuffer, {
-    resumable: false,
-    contentType: "audio/wav",
-    metadata: { metadata: { firebaseStorageDownloadTokens: token } },
-  });
-
-  return (
-    `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
-    `${encodeURIComponent(path)}?alt=media&token=${token}`
-  );
+  return uploadBuffer(path, wavBuffer, "audio/wav");
 }
 
 /** Save a job's narration audio at audio/{jobId}/{name}.wav. */

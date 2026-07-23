@@ -39,12 +39,19 @@ export default function StudioPage() {
     fullAudioUrl,
     audioProgress,
     thumbnailError,
+    imageStatus,
+    imageProgress,
+    imageSpend,
+    imageError,
     start,
     approve,
     generateVisuals,
     regenerateThumbnail,
     generateAudio,
     resumeAudio,
+    generateImages,
+    regenerateSceneImage,
+    uploadCharacterReference,
     reset,
   } = useGeneration();
 
@@ -76,11 +83,18 @@ export default function StudioPage() {
         fullAudioUrl={fullAudioUrl}
         audioProgress={audioProgress}
         thumbnailError={thumbnailError}
+        imageStatus={imageStatus}
+        imageProgress={imageProgress}
+        imageSpend={imageSpend}
+        imageError={imageError}
         onApprove={approve}
         onGenerateVisuals={generateVisuals}
         onRegenerateThumbnail={regenerateThumbnail}
         onGenerateAudio={generateAudio}
         onResumeAudio={resumeAudio}
+        onGenerateImages={generateImages}
+        onRegenerateSceneImage={regenerateSceneImage}
+        onUploadCharacterReference={uploadCharacterReference}
         onReset={reset}
       />
     </div>

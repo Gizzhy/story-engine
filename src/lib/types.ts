@@ -101,6 +101,13 @@ export interface Character {
   baselineOutfit: string;
   /** Assembled Whisk-ready reference prompt (identity + outfit + Style Block A). */
   referencePrompt: string;
+  /**
+   * The rendered reference portrait, attached as a subject to every scene this
+   * character appears in. Set by the image wave — or set ahead of it by an
+   * upload, which is exactly what makes a hand-made reference win: generation
+   * skips any character that already has one.
+   */
+  referenceImageUrl?: string;
 }
 
 /** A visual moment split from the narration; one image per scene (Phase 2). */
@@ -122,6 +129,30 @@ export interface Scene {
   outfits: { name: string; outfit: string }[];
   /** Assembled Whisk-ready scene prompt (setting + action + identities + Style Block A). */
   imagePrompt: string;
+  /** The rendered still for this scene, once the image wave has run. */
+  imageUrl?: string;
+  /**
+   * Outcome of the last render. 'blocked' (policy refusal) and 'error' are kept
+   * as explicit states rather than a missing image, so the few scenes needing a
+   * hand-fix are visible instead of silently absent.
+   */
+  imageState?: ImageState;
+  /** Previous takes from re-rolls, newest first, capped at 3. */
+  imageVariants?: SceneImageVariant[];
+  /** True while a forced re-roll is in flight — the UI's loading state. */
+  imageRegenerating?: boolean;
+  /** Isolated failure of a re-roll, kept off the job-level imageError. */
+  imageRegenError?: string;
+}
+
+/** Outcome of a single scene render. */
+export type ImageState = 'ok' | 'blocked' | 'error';
+
+/** A superseded scene image, kept so re-rolls can be compared. */
+export interface SceneImageVariant {
+  url: string;
+  /** ms epoch when generated (plain number — not a Firestore serverTimestamp). */
+  createdAt: number;
 }
 
 /** One backdrop shot of the cold open, anchored to a phrase of the monologue. */
@@ -264,8 +295,32 @@ export interface Job {
   fullAudioUrl?: string;
   /** Per-segment synthesis progress for the live "Segment X of N" audio view. */
   audioProgress?: { current: number; total: number };
+  /** Lifecycle of the image phase (an explicit, user-triggered step). */
+  imageStatus?: ImageStatus;
+  /** Scene-render progress for the live "Scene X of N" images view. */
+  imageProgress?: { current: number; total: number };
+  /**
+   * Running spend for this job's images. Images are the pipeline's dominant
+   * cost, so the count is tracked against IMAGE_CONFIG.maxImagesPerJob as a hard
+   * ceiling and shown live in the UI.
+   */
+  imageSpend?: { images: number; usd: number };
+  /** Job-level image failure (a per-scene failure lives on the scene instead). */
+  imageError?: string;
   error?: string;
 }
+
+/**
+ * Lifecycle of the image phase, kicked off explicitly on a finished story:
+ * character references first, then one still per scene with those references
+ * attached.
+ */
+export type ImageStatus =
+  | 'idle'
+  | 'references'
+  | 'scenes'
+  | 'done'
+  | 'error';
 
 /**
  * Lifecycle of the voice/TTS phase, kicked off explicitly on a finished story.

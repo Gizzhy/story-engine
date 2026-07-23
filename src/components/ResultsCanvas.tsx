@@ -2,6 +2,7 @@ import type {
   AudioStatus,
   Blueprint,
   Generation,
+  ImageStatus,
   JobSegment,
   JobStatus,
   Scene,
@@ -30,11 +31,21 @@ interface ResultsCanvasProps {
   fullAudioUrl: string | null;
   audioProgress: WriteProgress | null;
   thumbnailError: string | null;
+  imageStatus: ImageStatus | null;
+  imageProgress: WriteProgress | null;
+  imageSpend: { images: number; usd: number } | null;
+  imageError: string | null;
   onApprove: (chosenTitle: string) => void;
   onGenerateVisuals: () => void;
   onRegenerateThumbnail: () => void;
   onGenerateAudio: () => void;
   onResumeAudio: () => void;
+  onGenerateImages: () => void;
+  onRegenerateSceneImage: (sceneIndex: number) => void;
+  onUploadCharacterReference: (
+    characterName: string,
+    imageBase64: string,
+  ) => Promise<void>;
   onReset: () => void;
 }
 
@@ -59,11 +70,18 @@ export default function ResultsCanvas({
   fullAudioUrl,
   audioProgress,
   thumbnailError,
+  imageStatus,
+  imageProgress,
+  imageSpend,
+  imageError,
   onApprove,
   onGenerateVisuals,
   onRegenerateThumbnail,
   onGenerateAudio,
   onResumeAudio,
+  onGenerateImages,
+  onRegenerateSceneImage,
+  onUploadCharacterReference,
   onReset,
 }: ResultsCanvasProps) {
   return (
@@ -100,11 +118,18 @@ export default function ResultsCanvas({
           fullAudioUrl={fullAudioUrl}
           audioProgress={audioProgress}
           thumbnailError={thumbnailError}
+          imageStatus={imageStatus}
+          imageProgress={imageProgress}
+          imageSpend={imageSpend}
+          imageError={imageError}
           errorMessage={errorMessage}
           onGenerateVisuals={onGenerateVisuals}
           onRegenerateThumbnail={onRegenerateThumbnail}
           onGenerateAudio={onGenerateAudio}
           onResumeAudio={onResumeAudio}
+          onGenerateImages={onGenerateImages}
+          onRegenerateSceneImage={onRegenerateSceneImage}
+          onUploadCharacterReference={onUploadCharacterReference}
           onRegenerate={onReset}
         />
       )}

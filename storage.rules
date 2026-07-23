@@ -12,6 +12,14 @@ service firebase.storage {
       allow write: if false;
     }
 
+    // Scene/character images live under images/{jobId}/*. Same posture as audio:
+    // written ONLY by the Admin SDK in Cloud Functions (which bypasses these
+    // rules); the client reads them by URL, so public read, no client writes.
+    match /images/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Everything else is locked down by default.
     match /{allPaths=**} {
       allow read, write: if false;

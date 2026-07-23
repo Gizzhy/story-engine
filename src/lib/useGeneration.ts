@@ -7,6 +7,7 @@ import type {
   Blueprint,
   Generation,
   GenerationInput,
+  ImageStatus,
   Job,
   JobSegment,
   JobStatus,
@@ -51,6 +52,14 @@ export interface UseGeneration {
   audioProgress: WriteProgress | null;
   /** Error from a thumbnail-only re-roll (separate from the visual-phase error). */
   thumbnailError: string | null;
+  /** The image phase lifecycle, once image generation has been kicked off. */
+  imageStatus: ImageStatus | null;
+  /** Scene-render progress for "Scene X of N". */
+  imageProgress: WriteProgress | null;
+  /** Running image spend {images, usd} for the live cost readout. */
+  imageSpend: { images: number; usd: number } | null;
+  /** Job-level image error (a per-scene failure stays on the scene). */
+  imageError: string | null;
   /** Begin a run: invoke startJob, then subscribe to the job doc. */
   start: (input: GenerationInput) => Promise<void>;
   /** Approve the blueprint: invoke approveJob; the doc's status drives the UI. */
@@ -63,6 +72,15 @@ export interface UseGeneration {
   generateAudio: () => Promise<void>;
   /** Resume a quota-paused audio job: invoke resumeAudio; the doc drives the UI. */
   resumeAudio: () => Promise<void>;
+  /** Kick off scene image generation: invoke generateImages; the doc drives the UI. */
+  generateImages: () => Promise<void>;
+  /** Re-roll one scene's image; the doc's scene fields drive the UI. */
+  regenerateSceneImage: (sceneIndex: number) => Promise<void>;
+  /** Attach a hand-made reference (base64) to a character; the doc reflects it. */
+  uploadCharacterReference: (
+    characterName: string,
+    imageBase64: string,
+  ) => Promise<void>;
   /** Cancel / regenerate / start over — detaches and returns to idle. */
   reset: () => void;
 }
@@ -116,6 +134,13 @@ export function useGeneration(): UseGeneration {
   const [fullAudioUrl, setFullAudioUrl] = useState<string | null>(null);
   const [audioProgress, setAudioProgress] = useState<WriteProgress | null>(null);
   const [thumbnailError, setThumbnailError] = useState<string | null>(null);
+  const [imageStatus, setImageStatus] = useState<ImageStatus | null>(null);
+  const [imageProgress, setImageProgress] = useState<WriteProgress | null>(null);
+  const [imageSpend, setImageSpend] = useState<{
+    images: number;
+    usd: number;
+  } | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const unsubscribe = useRef<(() => void) | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -151,6 +176,10 @@ export function useGeneration(): UseGeneration {
           setFullAudioUrl(data.fullAudioUrl ?? null);
           setAudioProgress(data.audioProgress ?? null);
           setThumbnailError(data.thumbnailError ?? null);
+          setImageStatus(data.imageStatus ?? null);
+          setImageProgress(data.imageProgress ?? null);
+          setImageSpend(data.imageSpend ?? null);
+          setImageError(data.imageError ?? null);
           // The main job, the visual phase, or the audio phase can carry an error.
           if (
             data.status === "error" ||
@@ -184,6 +213,10 @@ export function useGeneration(): UseGeneration {
     setFullAudioUrl(null);
     setAudioProgress(null);
     setThumbnailError(null);
+    setImageStatus(null);
+    setImageProgress(null);
+    setImageSpend(null);
+    setImageError(null);
   }, []);
 
   const start = useCallback(
@@ -297,6 +330,50 @@ export function useGeneration(): UseGeneration {
     }
   }, []);
 
+  const generateImages = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    try {
+      const callable = httpsCallable<{ jobId: string }, { ok: boolean }>(
+        functions,
+        "generateImages",
+      );
+      // Don't change state locally — the doc's imageStatus drives the UI.
+      await callable({ jobId });
+    } catch (err) {
+      setImageStatus("error");
+      setImageError(
+        err instanceof Error ? err.message : "Failed to start image generation.",
+      );
+    }
+  }, []);
+
+  const regenerateSceneImage = useCallback(async (sceneIndex: number) => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    // The scene's imageRegenerating flag (set server-side) is the loading state;
+    // no local state needed. Any per-scene error arrives on the doc too.
+    const callable = httpsCallable<
+      { jobId: string; sceneIndex: number },
+      { ok: boolean }
+    >(functions, "regenerateSceneImage");
+    await callable({ jobId, sceneIndex });
+  }, []);
+
+  const uploadCharacterReference = useCallback(
+    async (characterName: string, imageBase64: string) => {
+      const jobId = jobIdRef.current;
+      if (!jobId) return;
+      const callable = httpsCallable<
+        { jobId: string; characterName: string; imageBase64: string },
+        { ok: boolean; url: string }
+      >(functions, "uploadCharacterReference");
+      // The new referenceImageUrl arrives via the doc snapshot.
+      await callable({ jobId, characterName, imageBase64 });
+    },
+    [],
+  );
+
   const reset = useCallback(() => {
     detach();
     jobIdRef.current = null;
@@ -332,12 +409,19 @@ export function useGeneration(): UseGeneration {
     fullAudioUrl,
     audioProgress,
     thumbnailError,
+    imageStatus,
+    imageProgress,
+    imageSpend,
+    imageError,
     start,
     approve,
     generateVisuals,
     regenerateThumbnail,
     generateAudio,
     resumeAudio,
+    generateImages,
+    regenerateSceneImage,
+    uploadCharacterReference,
     reset,
   };
 }
